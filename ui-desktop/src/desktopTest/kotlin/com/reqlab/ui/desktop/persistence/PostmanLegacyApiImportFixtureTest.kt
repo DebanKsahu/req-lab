@@ -132,9 +132,9 @@ class PostmanLegacyApiImportFixtureTest {
         val preScript = profile.preRequestScript
         assertNotNull(preScript, "Get Profile should have a pre-request script")
         assertTrue(preScript.contains("reqlab.environment.get"),
-            "postman.getGlobalVariable should be converted to reqlab.environment.get")
-        assertTrue(preScript.contains("reqlab.environment.set"),
-            "postman.setGlobalVariable should be converted to reqlab.environment.set")
+            "postman.getEnvironmentVariable should be converted to reqlab.environment.get")
+        assertTrue(preScript.contains("reqlab.globals.set"),
+            "postman.setGlobalVariable should be converted to reqlab.globals.set")
         assertNoPmOrPostmanCalls(preScript, "Get Profile pre-request script")
     }
 
