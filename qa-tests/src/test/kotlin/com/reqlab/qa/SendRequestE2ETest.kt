@@ -376,7 +376,7 @@ class SendRequestE2ETest {
                 reqlab.environment.set("respCode",   String(resp.code))
                 reqlab.environment.set("respText",   resp.text())
                 reqlab.environment.set("respName",   resp.json().name)
-                reqlab.environment.set("hasHeader",  resp.headers["Content-Type"] ? "yes" : "no")
+                reqlab.environment.set("hasHeader",  resp.headers.get("Content-Type") ? "yes" : "no")
             })
         """.trimIndent())
 
