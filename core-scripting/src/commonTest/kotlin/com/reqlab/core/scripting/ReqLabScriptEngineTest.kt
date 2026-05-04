@@ -979,7 +979,9 @@ class ReqLabScriptEngineTest {
                 reqlab.expect(reqlab.response.status).to.equal("OK")
             })
         """.trimIndent(), ctx())
-        assertTrue(r.assertions[0].passed)
+        assertNull(r.error, "Script engine error: ${r.error}")
+        assertTrue(r.assertions.isNotEmpty(), "No assertions captured — engine may have failed silently")
+        assertTrue(r.assertions[0].passed, r.assertions[0].message ?: "assertion failed")
     }
 
     @Test

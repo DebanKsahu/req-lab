@@ -61,6 +61,14 @@ tasks.matching { it.name == "jsBrowserTest" || it.name == "wasmJsBrowserTest" }
         enabled = false
     }
 
+// GraalVM Polyglot requires module access on standard JDK 21 (non-GraalVM JDK).
+tasks.matching { it.name == "desktopTest" }
+    .configureEach {
+        (this as Test).jvmArgs(
+            "-Dpolyglot.engine.WarnInterpreterOnly=false",
+        )
+    }
+
 val runAppleSimulatorTests = providers.gradleProperty("runAppleSimulatorTests")
     .map { it.equals("true", ignoreCase = true) }
     .orElse(false)
