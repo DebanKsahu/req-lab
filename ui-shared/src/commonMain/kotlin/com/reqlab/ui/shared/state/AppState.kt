@@ -14,6 +14,7 @@ import com.reqlab.core.model.ResponseDefinition
 import kotlinx.coroutines.Job
 import com.reqlab.ui.shared.platform.generateUuid
 import com.reqlab.ui.shared.platform.currentTimeMillis
+import com.reqlab.ui.shared.components.syncParamsFromUrl
 
 import com.reqlab.ui.shared.i18n.AppLanguage
 
@@ -220,7 +221,7 @@ class RequestTabState(
     name: String = "Untitled",
     method: HttpMethodType = HttpMethodType.GET,
     url: String = "",
-    val collectionName: String? = null,
+    collectionName: String? = null,
     val folderPath: List<String> = emptyList(),
 ) {
     val requestId: String get() = id
@@ -231,6 +232,8 @@ class RequestTabState(
     var isDirty  by mutableStateOf(false)
     var lastSavedTimestamp by mutableStateOf<Long?>(null)
     private var savedSnapshot by mutableStateOf("")
+
+    var collectionName by mutableStateOf(collectionName)
 
     var selectedEditorTab by mutableStateOf(RequestEditorTab.PARAMS)
 
@@ -407,6 +410,38 @@ class RequestTabState(
         savedSnapshot = currentSnapshotForDirtyTracking()
         isDirty = false
         lastSavedTimestamp = currentTimeMillis()
+    }
+
+    /**
+     * After a rename, replaces only the name prefix of [savedSnapshot] so that
+     * dirty tracking still reflects unsaved body/URL changes.
+     *
+     * Without this fix, renaming a tab permanently corrupts [savedSnapshot] with the
+     * old name → subsequent [recomputeDirty] always returns `true`, even when the user
+     * reverts every other edit back to the original values.
+     *
+     * [oldName] is the name the tab had immediately before the rename.
+     */
+    fun reanchorSavedSnapshotAfterRename(oldName: String) {
+        // Snapshot format: name#method#url#…  (components joined with '#')
+        // We need to replace the leading name component without touching the rest.
+        val sep = '#'
+        val prefixWithSep = "$oldName$sep"
+        savedSnapshot = when {
+            savedSnapshot.startsWith(prefixWithSep) ->
+                "$name$sep${savedSnapshot.removePrefix(prefixWithSep)}"
+            savedSnapshot == oldName ->
+                name
+            !isDirty ->
+                // Edge case: name itself contained '#' so the prefix didn't match.
+                // The tab is clean so a full reanchor is safe.
+                currentSnapshotForDirtyTracking()
+            else ->
+                // Dirty tab and couldn't parse. Leave savedSnapshot unchanged.
+                // Cmd+S (markSaved) will fully re-anchor on the next explicit save.
+                savedSnapshot
+        }
+        recomputeDirty()
     }
 
     fun syncSystemHeaders() {
@@ -655,6 +690,10 @@ class AppState(openDefaultTab: Boolean = true, withDemoData: Boolean = false) {
         val pathWithoutNode = if (found && fPath.isNotEmpty()) fPath.dropLast(1) else emptyList()
         val node = findNodeById(collections, requestId)
         val tab = RequestTabState(id = requestId, name = name, method = method, url = url, collectionName = cName, folderPath = pathWithoutNode)
+        // Populate params from the URL query string so the Params tab shows them
+        // immediately on first open. CollectionNode has no params field so this is
+        // the only opportunity to seed them before the user opens the Params tab.
+        if (url.contains('?')) syncParamsFromUrl(tab, url)
         node?.preRequestScript?.takeIf { it.isNotBlank() }?.let { tab.preRequestScript = it }
         node?.testScript?.takeIf { it.isNotBlank() }?.let { tab.testScript = it }
         // Populate body, headers, and auth from collection node
@@ -687,6 +726,11 @@ class AppState(openDefaultTab: Boolean = true, withDemoData: Boolean = false) {
             if (existing != null) existing.value = v
             else tab.headers.add(MutableKeyValue(k, v, kind = HeaderKind.USER))
         }
+        // Re-anchor the saved snapshot after all fields (including system headers
+        // injected by syncSystemHeaders above) have been populated. Without this,
+        // the snapshot captured in RequestTabState.init{} pre-dates the system
+        // headers, so recomputeDirty() is always true immediately after opening.
+        tab.restoreSavedSnapshot(null)
         openTabs.add(tab)
         activeTabIndex = openTabs.size - 1
         selectedRequestId = requestId
@@ -763,6 +807,34 @@ class AppState(openDefaultTab: Boolean = true, withDemoData: Boolean = false) {
             activeTabIndex = openTabs.size - 1
         }
         selectedRequestId = activeTab?.id
+    }
+
+    /**
+     * Closes every open tab whose id is in [ids].
+     * Safe to call with ids that have no matching open tab (silently ignored).
+     * Adjusts [activeTabIndex] correctly even when multiple tabs are removed.
+     */
+    fun closeTabsByIds(ids: Collection<String>) {
+        if (ids.isEmpty()) return
+        val idSet = ids.toHashSet()
+        // Remove in reverse-index order to keep earlier indices valid.
+        openTabs.indices.reversed()
+            .filter { openTabs[it].id in idSet }
+            .forEach { openTabs.removeAt(it) }
+        if (openTabs.isEmpty()) {
+            activeTabIndex = -1
+        } else if (activeTabIndex >= openTabs.size) {
+            activeTabIndex = openTabs.size - 1
+        }
+        selectedRequestId = activeTab?.id
+    }
+
+    /** Updates [RequestTabState.collectionName] for every open tab that still has [oldName].
+     *  Called after a root collection is renamed so [resolveSidebarRequestId] keeps working. */
+    fun updateTabsCollectionName(oldName: String, newName: String) {
+        openTabs.forEach { tab ->
+            if (tab.collectionName == oldName) tab.collectionName = newName
+        }
     }
 
     fun moveTab(fromIndex: Int, toIndex: Int) {
@@ -861,7 +933,15 @@ class AppState(openDefaultTab: Boolean = true, withDemoData: Boolean = false) {
     fun renameRequestEverywhere(requestId: String, newName: String) {
         val trimmed = newName.trim()
         if (trimmed.isEmpty()) return
-        openTabs.filter { it.id == requestId }.forEach { it.name = trimmed }
+        openTabs.filter { it.id == requestId }.forEach { tab ->
+            val oldName = tab.name
+            tab.name = trimmed
+            // Re-anchor the name component of savedSnapshot so that dirty tracking
+            // reflects only non-name unsaved changes after a rename from the sidebar
+            // or tab chip. Without this, reverting a URL edit after a rename always
+            // appears dirty because savedSnapshot still contains the old name.
+            tab.reanchorSavedSnapshotAfterRename(oldName)
+        }
         renameRequestNodeById(collections, requestId, trimmed)
         notifyCollectionsChanged()
     }

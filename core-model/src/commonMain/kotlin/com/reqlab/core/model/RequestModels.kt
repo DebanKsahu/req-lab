@@ -11,7 +11,9 @@ enum class HttpMethodType {
     PATCH,
     DELETE,
     OPTIONS,
-    HEAD
+    HEAD,
+    TRACE,
+    CONNECT
 }
 
 @Serializable

@@ -355,15 +355,38 @@ class PostmanImporterTest {
     }
 
     @Test
-    fun `convertScript replaces pm_globals with environment`() {
+    fun `convertScript replaces pm_globals with globals scope`() {
         val result = PostmanImporter.convertScript("pm.globals.set('k','v')")
-        assertEquals("reqlab.environment.set('k','v')", result)
+        assertEquals("reqlab.globals.set('k','v')", result)
     }
 
     @Test
-    fun `convertScript comments out pm_sendRequest`() {
+    fun `convertScript translates pm_sendRequest to reqlab_sendRequest`() {
         val result = PostmanImporter.convertScript("pm.sendRequest('url', cb)")
-        assertTrue(result.contains("// pm.sendRequest is not supported in ReqLab"))
+        assertEquals("reqlab.sendRequest('url', cb)", result)
+    }
+
+    @Test
+    fun `convertScript translates pm_sendRequest with options object`() {
+        val script = "pm.sendRequest({ url: pm.variables.get('base') + '/auth', method: 'POST' }, function(err, resp) { pm.environment.set('tok', resp.json().token) })"
+        val result = PostmanImporter.convertScript(script)
+        assertTrue(result.contains("reqlab.sendRequest("), "Should contain reqlab.sendRequest(")
+        assertFalse(result.contains("pm.sendRequest("), "Should not contain pm.sendRequest(")
+        // Other pm.* inside the script should also be translated
+        assertTrue(result.contains("reqlab.environment.set("))
+        assertTrue(result.contains("reqlab.variables.get("))
+    }
+
+    @Test
+    fun `convertScript translates multiple pm_sendRequest calls`() {
+        val script = """
+            pm.sendRequest("https://first", function(err, r) { pm.environment.set("a", r.json().a) })
+            pm.sendRequest("https://second", function(err, r) { pm.environment.set("b", r.json().b) })
+        """.trimIndent()
+        val result = PostmanImporter.convertScript(script)
+        val count = result.split("reqlab.sendRequest(").size - 1
+        assertEquals(2, count, "Both sendRequest calls should be translated")
+        assertFalse(result.contains("pm.sendRequest("))
     }
 
     @Test
@@ -400,7 +423,7 @@ class PostmanImporterTest {
     @Test
     fun `convertScript replaces postman_setGlobalVariable`() {
         assertEquals(
-            "reqlab.environment.set('g','v')",
+            "reqlab.globals.set('g','v')",
             PostmanImporter.convertScript("postman.setGlobalVariable('g','v')")
         )
     }
@@ -408,7 +431,7 @@ class PostmanImporterTest {
     @Test
     fun `convertScript replaces postman_getGlobalVariable`() {
         assertEquals(
-            "reqlab.environment.get('g')",
+            "reqlab.globals.get('g')",
             PostmanImporter.convertScript("postman.getGlobalVariable('g')")
         )
     }
@@ -471,6 +494,129 @@ class PostmanImporterTest {
         assertTrue(result.contains("// postman.setNextRequest is not supported in ReqLab"), "setNextRequest commented")
     }
 
+    // ── convertScript – scope preservation (globals / collectionVariables / variables) ──
+
+    @Test
+    fun `convertScript preserves globals scope for pm_globals_get`() {
+        assertEquals("reqlab.globals.get('k')", PostmanImporter.convertScript("pm.globals.get('k')"))
+    }
+
+    @Test
+    fun `convertScript preserves globals scope for pm_globals_unset`() {
+        assertEquals("reqlab.globals.unset('k')", PostmanImporter.convertScript("pm.globals.unset('k')"))
+    }
+
+    @Test
+    fun `convertScript preserves globals scope for pm_globals_has`() {
+        assertEquals("reqlab.globals.has('k')", PostmanImporter.convertScript("pm.globals.has('k')"))
+    }
+
+    @Test
+    fun `convertScript preserves globals scope for pm_globals_clear`() {
+        assertEquals("reqlab.globals.clear()", PostmanImporter.convertScript("pm.globals.clear()"))
+    }
+
+    @Test
+    fun `convertScript preserves collectionVariables scope for all methods`() {
+        assertEquals("reqlab.collectionVariables.get('k')", PostmanImporter.convertScript("pm.collectionVariables.get('k')"))
+        assertEquals("reqlab.collectionVariables.set('k','v')", PostmanImporter.convertScript("pm.collectionVariables.set('k','v')"))
+        assertEquals("reqlab.collectionVariables.unset('k')", PostmanImporter.convertScript("pm.collectionVariables.unset('k')"))
+        assertEquals("reqlab.collectionVariables.has('k')", PostmanImporter.convertScript("pm.collectionVariables.has('k')"))
+        assertEquals("reqlab.collectionVariables.clear()", PostmanImporter.convertScript("pm.collectionVariables.clear()"))
+    }
+
+    @Test
+    fun `convertScript maps pm_variables to variables scope`() {
+        assertEquals("reqlab.variables.get('k')", PostmanImporter.convertScript("pm.variables.get('k')"))
+        assertEquals("reqlab.variables.set('k','v')", PostmanImporter.convertScript("pm.variables.set('k','v')"))
+        assertEquals("reqlab.variables.unset('k')", PostmanImporter.convertScript("pm.variables.unset('k')"))
+        assertEquals("reqlab.variables.has('k')", PostmanImporter.convertScript("pm.variables.has('k')"))
+    }
+
+    @Test
+    fun `convertScript maps pm_environment_clear`() {
+        assertEquals("reqlab.environment.clear()", PostmanImporter.convertScript("pm.environment.clear()"))
+    }
+
+    // ── convertScript – response chain assertions ──────────────────────────────
+
+    @Test
+    fun `convertScript translates pm_response_to_have_status`() {
+        val result = PostmanImporter.convertScript("pm.response.to.have.status(200)")
+        assertEquals("reqlab.response.statusIs(200)", result)
+    }
+
+    @Test
+    fun `convertScript translates pm_response_to_have_header`() {
+        val result = PostmanImporter.convertScript("pm.response.to.have.header('Content-Type')")
+        assertEquals("reqlab.response.hasHeader('Content-Type')", result)
+    }
+
+    @Test
+    fun `convertScript translates pm_response_to_be_ok`() {
+        val result = PostmanImporter.convertScript("pm.response.to.be.ok")
+        assertEquals("reqlab.response.statusOk()", result)
+    }
+
+    @Test
+    fun `convertScript translates pm_response_to_be_ok inside test block`() {
+        val input = "pm.test('ok', function() { pm.response.to.be.ok; })"
+        val result = PostmanImporter.convertScript(input)
+        assertFalse(result.contains("pm.response"), "pm.response must be gone")
+        assertTrue(result.contains("reqlab.response.statusOk()"), "statusOk must be present")
+        assertTrue(result.contains("reqlab.test("), "test must be converted")
+    }
+
+    // ── convertScript – execution control ─────────────────────────────────────
+
+    @Test
+    fun `convertScript comments out pm_execution_setNextRequest`() {
+        val result = PostmanImporter.convertScript("pm.execution.setNextRequest('Step2')")
+        assertTrue(result.contains("// pm.execution.setNextRequest is not supported in ReqLab"))
+        assertFalse(result.contains("reqlab.execution"))
+    }
+
+    @Test
+    fun `convertScript comments out pm_execution_skipRequest`() {
+        val result = PostmanImporter.convertScript("pm.execution.skipRequest()")
+        assertTrue(result.contains("// pm.execution.skipRequest is not supported in ReqLab"))
+    }
+
+    // ── convertScript – pm.info / stubs ───────────────────────────────────────
+
+    @Test
+    fun `convertScript maps pm_info to reqlab_info`() {
+        assertEquals("reqlab.info.requestName", PostmanImporter.convertScript("pm.info.requestName"))
+        assertEquals("reqlab.info.iterationCount", PostmanImporter.convertScript("pm.info.iterationCount"))
+    }
+
+    @Test
+    fun `convertScript maps pm_iterationData to reqlab_iterationData`() {
+        assertEquals("reqlab.iterationData.get('key')", PostmanImporter.convertScript("pm.iterationData.get('key')"))
+    }
+
+    @Test
+    fun `convertScript maps pm_cookies to reqlab_cookies`() {
+        assertEquals("reqlab.cookies.get('session')", PostmanImporter.convertScript("pm.cookies.get('session')"))
+    }
+
+    // ── convertScript – legacy postman.* global scope preservation ────────────
+
+    @Test
+    fun `convertScript maps postman_clearGlobalVariable to globals scope`() {
+        assertEquals(
+            "reqlab.globals.unset('g')",
+            PostmanImporter.convertScript("postman.clearGlobalVariable('g')")
+        )
+    }
+
+    @Test
+    fun `convertScript maps postman_clearGlobalVariables to globals scope`() {
+        assertEquals(
+            "reqlab.globals.clear()",
+            PostmanImporter.convertScript("postman.clearGlobalVariables()")
+        )
+    }
 
 
     @Test
@@ -527,5 +673,49 @@ class PostmanImporterTest {
     fun `importEnvironment throws when name is missing`() {
         val root = parse("""{"values":[]}""")
         assertFailsWith<ImportExportException> { PostmanImporter.importEnvironment(root) }
+    }
+
+    // ── TRACE and CONNECT method support ───────────────────────────────────────
+
+    @Test
+    fun `importCollection preserves TRACE method`() {
+        val root = parse("""
+        {
+          "info":{"name":"Methods","schema":"https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},
+          "item":[
+            {"name":"Trace","request":{"method":"TRACE","url":"https://example.com","header":[]}}
+          ]
+        }
+        """.trimIndent())
+        val req = PostmanImporter.importCollection(root).requests[0]
+        assertEquals("TRACE", req.method)
+    }
+
+    @Test
+    fun `importCollection preserves CONNECT method`() {
+        val root = parse("""
+        {
+          "info":{"name":"Methods","schema":"https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},
+          "item":[
+            {"name":"Connect","request":{"method":"CONNECT","url":"https://example.com","header":[]}}
+          ]
+        }
+        """.trimIndent())
+        val req = PostmanImporter.importCollection(root).requests[0]
+        assertEquals("CONNECT", req.method)
+    }
+
+    @Test
+    fun `importCollection falls back to GET for unknown methods`() {
+        val root = parse("""
+        {
+          "info":{"name":"Methods","schema":"https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},
+          "item":[
+            {"name":"Unknown","request":{"method":"PROPFIND","url":"https://example.com","header":[]}}
+          ]
+        }
+        """.trimIndent())
+        val req = PostmanImporter.importCollection(root).requests[0]
+        assertEquals("GET", req.method)
     }
 }

@@ -55,6 +55,8 @@ object ReqLabColors {
     val MethodDelete: Color        @Composable @ReadOnlyComposable get() = LocalAppColors.current.methodDelete
     val MethodOptions: Color       @Composable @ReadOnlyComposable get() = LocalAppColors.current.methodOptions
     val MethodHead: Color          @Composable @ReadOnlyComposable get() = LocalAppColors.current.methodHead
+    val MethodTrace: Color         @Composable @ReadOnlyComposable get() = LocalAppColors.current.methodTrace
+    val MethodConnect: Color       @Composable @ReadOnlyComposable get() = LocalAppColors.current.methodConnect
 
     val StatusSuccess: Color       @Composable @ReadOnlyComposable get() = LocalAppColors.current.statusSuccess
     val StatusRedirect: Color      @Composable @ReadOnlyComposable get() = LocalAppColors.current.statusRedirect
@@ -76,6 +78,8 @@ fun httpMethodColor(method: HttpMethodType): Color = when (method) {
     HttpMethodType.DELETE  -> ReqLabColors.MethodDelete
     HttpMethodType.OPTIONS -> ReqLabColors.MethodOptions
     HttpMethodType.HEAD    -> ReqLabColors.MethodHead
+    HttpMethodType.TRACE   -> ReqLabColors.MethodTrace
+    HttpMethodType.CONNECT -> ReqLabColors.MethodConnect
 }
 
 @Composable

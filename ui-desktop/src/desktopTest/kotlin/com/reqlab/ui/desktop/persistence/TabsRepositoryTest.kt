@@ -2,16 +2,19 @@ package com.reqlab.ui.shared.persistence
 
 import com.reqlab.core.model.AuthType
 import com.reqlab.core.model.BodyType
+import com.reqlab.core.model.FormEntryType
 import com.reqlab.core.model.HttpMethodType
 import com.reqlab.ui.shared.platform.PlatformStorage
 import com.reqlab.ui.shared.state.AppState
 import com.reqlab.ui.shared.state.HeaderKind
+import com.reqlab.ui.shared.state.MutableFormDataRow
 import com.reqlab.ui.shared.state.MutableKeyValue
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
 import java.io.File
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class TabsRepositoryTest {
@@ -138,5 +141,94 @@ class TabsRepositoryTest {
             loaded.bodyContent,
             "Large body content must survive TabsRepository save/load exactly",
         )
+    }
+
+    // ── Dirty-state-after-restart regression tests (Bug #4) ──────────────
+
+    @Test
+    fun `clean GET tab is not dirty after save and reload`() {
+        val source = AppState()
+        val tab = source.activeTab!!
+        tab.name = "Get Users"
+        tab.method = HttpMethodType.GET
+        tab.url = "https://api.example.com/users"
+        tab.bodyType = BodyType.NONE
+        // bodyContent intentionally left blank — mirrors addTab() behaviour
+        tab.markSaved()
+
+        TabsRepository.save(source)
+
+        val loadedState = AppState()
+        TabsRepository.load(loadedState)
+        val loaded = loadedState.activeTab!!
+
+        assertFalse(loaded.isDirty,
+            "A clean GET tab must not be dirty after save/load (bodyContent blank entry bug)")
+    }
+
+    @Test
+    fun `clean POST JSON tab is not dirty after save and reload`() {
+        val source = AppState()
+        val tab = source.activeTab!!
+        tab.name = "Create User"
+        tab.method = HttpMethodType.POST
+        tab.url = "https://api.example.com/users"
+        tab.bodyType = BodyType.JSON
+        tab.bodyContent = "{\"name\":\"Alice\"}"
+        tab.markSaved()
+
+        TabsRepository.save(source)
+
+        val loadedState = AppState()
+        TabsRepository.load(loadedState)
+        val loaded = loadedState.activeTab!!
+
+        assertFalse(loaded.isDirty,
+            "A clean POST JSON tab must not be dirty after save/load")
+    }
+
+    @Test
+    fun `clean form-data tab is not dirty after save and reload`() {
+        val source = AppState()
+        val tab = source.activeTab!!
+        tab.name = "Upload Form"
+        tab.method = HttpMethodType.POST
+        tab.url = "https://api.example.com/upload"
+        tab.bodyType = BodyType.FORM_DATA
+        tab.formRows.add(MutableFormDataRow("file", FormEntryType.FILE, "/path/to/file.txt", "", true))
+        tab.formRows.add(MutableFormDataRow("name", FormEntryType.TEXT, "Alice", "", true))
+        tab.markSaved()
+
+        TabsRepository.save(source)
+
+        val loadedState = AppState()
+        TabsRepository.load(loadedState)
+        val loaded = loadedState.activeTab!!
+
+        assertFalse(loaded.isDirty,
+            "A clean form-data tab must not be dirty after save/load (formRows loaded after restoreSavedSnapshot bug)")
+        assertEquals(2, loaded.formRows.size, "formRows must round-trip through persistence")
+    }
+
+    @Test
+    fun `clean urlencoded tab is not dirty after save and reload`() {
+        val source = AppState()
+        val tab = source.activeTab!!
+        tab.name = "Encoded Form"
+        tab.method = HttpMethodType.POST
+        tab.url = "https://api.example.com/form"
+        tab.bodyType = BodyType.X_WWW_FORM_URLENCODED
+        tab.urlencodedRows.add(MutableFormDataRow("username", FormEntryType.TEXT, "alice", "", true))
+        tab.markSaved()
+
+        TabsRepository.save(source)
+
+        val loadedState = AppState()
+        TabsRepository.load(loadedState)
+        val loaded = loadedState.activeTab!!
+
+        assertFalse(loaded.isDirty,
+            "A clean url-encoded tab must not be dirty after save/load")
+        assertEquals(1, loaded.urlencodedRows.size, "urlencodedRows must round-trip through persistence")
     }
 }

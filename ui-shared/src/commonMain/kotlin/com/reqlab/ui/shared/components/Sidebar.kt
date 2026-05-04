@@ -434,6 +434,9 @@ fun Sidebar(state: AppState) {
                                 val action = {
                                     val deleted = deleteFolderFromCollections(state.collections, target.id)
                                     if (deleted != null) {
+                                        // Close all tabs belonging to requests in the deleted folder
+                                        val deletedIds = collectAllRequestIds(deleted)
+                                        state.closeTabsByIds(deletedIds)
                                         state.notifyCollectionsChanged()
                                         persistWorkspaceAsync()
                                         state.log("Collection deleted: ${target.name}", LogLevel.INFO)
@@ -469,6 +472,7 @@ fun Sidebar(state: AppState) {
                             onDeleteRequest = { target ->
                                 val action = {
                                     deleteRequestFromCollections(state.collections, target.id)
+                                    state.closeTabsByIds(listOf(target.id))
                                     state.notifyCollectionsChanged()
                                     persistWorkspaceAsync()
                                     state.log("Request deleted: ${target.name}", LogLevel.INFO)
@@ -766,8 +770,14 @@ fun Sidebar(state: AppState) {
                 val target = renameCollectionTarget ?: return@RenameItemDialog
                 val trimmed = renameCollectionValue.trim()
                 if (trimmed.isNotEmpty()) {
+                    val oldName = target.name
+                    val isRootCollection = state.collections.any { it.id == target.id }
                     val renamed = renameFolderInCollections(state.collections, target.id, trimmed)
                     if (renamed) {
+                        if (isRootCollection) {
+                            val actualNewName = state.collections.firstOrNull { it.id == target.id }?.name
+                            if (actualNewName != null) state.updateTabsCollectionName(oldName, actualNewName)
+                        }
                         state.notifyCollectionsChanged()
                         persistWorkspaceAsync()
                     }
@@ -1863,6 +1873,12 @@ fun deleteFolderFromCollections(
     collections: MutableList<CollectionNode>,
     folderId: String,
 ): CollectionNode? = deleteFolderFromNodeList(collections, folderId)
+
+/** Recursively collects all request (non-folder) IDs from a [CollectionNode] subtree. */
+fun collectAllRequestIds(node: CollectionNode): List<String> {
+    if (!node.isFolder) return listOf(node.id)
+    return node.children.flatMap { collectAllRequestIds(it) }
+}
 
 private fun deleteFolderFromNodeList(
     nodes: MutableList<CollectionNode>,

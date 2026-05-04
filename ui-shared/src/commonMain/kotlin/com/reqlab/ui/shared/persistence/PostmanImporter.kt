@@ -114,7 +114,7 @@ object PostmanImporter {
     }
 
     private fun normalizeMethod(raw: String?): String = when (raw?.uppercase()) {
-        "GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD" -> raw!!.uppercase()
+        "GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", "TRACE", "CONNECT" -> raw!!.uppercase()
         else -> "GET"
     }
 
@@ -314,54 +314,46 @@ object PostmanImporter {
     fun convertScript(script: String): String {
         if (script.isBlank()) return script
         return script
-            // ── Modern pm.* API ────────────────────────────────────────────────
+            // ── Response chain assertions (MUST precede pm.response generic replacement) ──
+            .replace("pm.response.to.have.status(", "reqlab.response.statusIs(")
+            .replace("pm.response.to.have.header(", "reqlab.response.hasHeader(")
+            .replace(Regex("""\bpm\.response\.to\.be\.ok\b"""), "reqlab.response.statusOk()")
 
-            // Test / assertion
+            // ── Unsupported operations — comment them out ─────────────────────
+            .replace("pm.execution.setNextRequest(", "// pm.execution.setNextRequest is not supported in ReqLab\n// pm.execution.setNextRequest(")
+            .replace("pm.execution.skipRequest(", "// pm.execution.skipRequest is not supported in ReqLab\n// pm.execution.skipRequest(")
+            // pm.sendRequest is fully supported — translate directly
+            .replace("pm.sendRequest(", "reqlab.sendRequest(")
+
+            // ── Modern pm.* → reqlab.* namespace translation ───────────────────
+            // Named operations first, then catch-all namespace prefixes.
             .replace("pm.test(", "reqlab.test(")
             .replace("pm.expect(", "reqlab.expect(")
-            // Response
+            // Catch-all: handles get/set/unset/clear/has/toObject/replaceIn + any future method.
             .replace("pm.response", "reqlab.response")
-            // Request (pre-request mutations)
             .replace("pm.request", "reqlab.request")
-            // Environment variables
-            .replace("pm.environment.get(", "reqlab.environment.get(")
-            .replace("pm.environment.set(", "reqlab.environment.set(")
-            .replace("pm.environment.unset(", "reqlab.environment.unset(")
-            // Global variables → map to environment for ReqLab compatibility
-            .replace("pm.globals.get(", "reqlab.environment.get(")
-            .replace("pm.globals.set(", "reqlab.environment.set(")
-            .replace("pm.globals.unset(", "reqlab.environment.unset(")
-            // Variable resolution shorthand
-            .replace("pm.variables.get(", "reqlab.environment.get(")
-            // Collection variables → map to environment
-            .replace("pm.collectionVariables.get(", "reqlab.environment.get(")
-            .replace("pm.collectionVariables.set(", "reqlab.environment.set(")
-            .replace("pm.collectionVariables.unset(", "reqlab.environment.unset(")
-            // sendRequest is not supported — comment it out
-            .replace("pm.sendRequest(", "// pm.sendRequest is not supported in ReqLab\n// pm.sendRequest(")
+            .replace("pm.environment", "reqlab.environment")
+            .replace("pm.globals", "reqlab.globals")
+            .replace("pm.collectionVariables", "reqlab.collectionVariables")
+            .replace("pm.variables", "reqlab.variables")
+            .replace("pm.info", "reqlab.info")
+            .replace("pm.iterationData", "reqlab.iterationData")
+            .replace("pm.cookies", "reqlab.cookies")
 
             // ── Legacy postman.* API (pre-pm era) ─────────────────────────────
-            // Old Postman sandbox used `postman.*` before the `pm.*` namespace was
-            // introduced. Collections exported from older Postman versions still use it.
-
-            // Environment variable helpers
             .replace("postman.getEnvironmentVariable(", "reqlab.environment.get(")
             .replace("postman.setEnvironmentVariable(", "reqlab.environment.set(")
             .replace("postman.clearEnvironmentVariable(", "reqlab.environment.unset(")
             .replace("postman.clearEnvironmentVariables(", "reqlab.environment.clear(")
-            // Global variable helpers (map to environment scope in ReqLab)
-            .replace("postman.getGlobalVariable(", "reqlab.environment.get(")
-            .replace("postman.setGlobalVariable(", "reqlab.environment.set(")
-            .replace("postman.clearGlobalVariable(", "reqlab.environment.unset(")
-            .replace("postman.clearGlobalVariables(", "reqlab.environment.clear(")
-            // setNextRequest — collection runner flow control; not applicable outside a runner
+            .replace("postman.getGlobalVariable(", "reqlab.globals.get(")
+            .replace("postman.setGlobalVariable(", "reqlab.globals.set(")
+            .replace("postman.clearGlobalVariable(", "reqlab.globals.unset(")
+            .replace("postman.clearGlobalVariables(", "reqlab.globals.clear(")
             .replace("postman.setNextRequest(", "// postman.setNextRequest is not supported in ReqLab\n// postman.setNextRequest(")
 
             // ── Legacy global sandbox shortcuts ───────────────────────────────
-            // responseCode.code / responseCode.name before responseCode itself
             .replace("responseCode.code", "response.code")
             .replace("responseCode.name", "response.status")
-            // responseBody as a standalone word (avoid matching e.g. responseBodyData)
             .replace(Regex("""\bresponseBody\b"""), "response.text()")
     }
 

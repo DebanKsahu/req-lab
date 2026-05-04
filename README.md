@@ -94,6 +94,19 @@ JavaScript pre-request and post-request scripts through the `reqlab` namespace.
 - **Pre-request**: mutate URL, headers, body, query params, and auth before dispatch
 - **Post-request**: assert status, headers, timing, and body; persist extracted values
 - Console logging via `reqlab.console.log(...)`
+- **HTTP sub-requests** via `reqlab.sendRequest()` — make real HTTP calls from within scripts (fetch tokens, look up resources, chain requests)
+
+```javascript
+// Pre-request: fetch a token and inject it as a header
+reqlab.sendRequest({
+    url: "https://api.example.com/auth/token",
+    method: "POST",
+    header: [{ key: "Content-Type", value: "application/json" }],
+    body: { mode: "raw", raw: JSON.stringify({ username: "alice", password: "secret" }) }
+}, function(err, resp) {
+    reqlab.request.headers.upsert("Authorization", "Bearer " + resp.json().token)
+})
+```
 
 See the full guide: [docs/scripts.md](docs/scripts.md)
 
@@ -106,6 +119,7 @@ Four scopes, all interpolated as `{{variable}}` in URL, headers, body, and auth:
 | Environment | `reqlab.environment.*` | Persisted with selected environment |
 | Global | `reqlab.globals.*` | Persisted workspace-wide |
 | Collection | `reqlab.collectionVariables.*` | Session-scoped runtime map |
+| Request | `reqlab.variables.*` | Read-only merged view (request → collection → env → global) |
 
 ### ✅ Assertions
 
@@ -135,7 +149,9 @@ Import **Postman Collection v2 / v2.1** and **Postman Environment** files direct
 - All folders, requests, URLs, methods, headers, bodies, and auth types
 - `pm.*` script calls are automatically rewritten to `reqlab.*` equivalents
 - Legacy `postman.*` API calls (pre-v6) are also converted on import
-- Disabled headers and variables are skipped; `pm.sendRequest` and `postman.setNextRequest` are commented out
+- Disabled headers and variables are skipped on import
+- `pm.sendRequest` is **fully supported** — translated to `reqlab.sendRequest()` automatically
+- `postman.setNextRequest` has no equivalent and is commented out with a note
 - See [docs/scripts.md](docs/scripts.md#8-postman-migration-guide) for the full conversion reference
 
 ### ⌨️ Keyboard Shortcuts

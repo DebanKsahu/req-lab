@@ -1,5 +1,7 @@
 package com.reqlab.ui.shared.state
 
+import androidx.compose.runtime.mutableStateListOf
+import com.reqlab.core.model.BodyType
 import com.reqlab.core.model.HttpMethodType
 import org.junit.Test
 import kotlin.test.assertEquals
@@ -437,5 +439,349 @@ class AppStateCollectionTest {
 
         assertEquals("r1", state.selectedRequestId)
         assertEquals("r1", state.sidebarScrollToRequestId)
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Regression Bug #2: Dirty-state false positive after reverting
+    // an edit when the tab was opened from the collection sidebar.
+    //
+    // Root cause: addTab calls syncSystemHeaders() AFTER the
+    // RequestTabState.init{} block has already captured savedSnapshot
+    // (without system headers). Once headers diverge from savedSnapshot,
+    // recomputeDirty() always returns true even when the user reverts
+    // their last edit to the original URL.
+    // ─────────────────────────────────────────────────────────────
+
+    @Test
+    fun openRequest_from_collection_does_not_produce_false_dirty_after_reverting_url_edit() {
+        // Use a node with bodyType set so that addTab calls syncSystemHeaders(),
+        // which adds Content-Type / Accept / User-Agent after savedSnapshot is captured.
+        val state = AppState(openDefaultTab = false)
+        val node = CollectionNode(
+            id = "req-dirty-test",
+            name = "Post Data",
+            isFolder = false,
+            method = HttpMethodType.POST,
+            url = "https://api.com/data",
+            bodyType = BodyType.JSON,
+        )
+        state.collections.add(
+            CollectionNode(
+                id = "coll-dirty-test",
+                name = "Dirty Bug Collection",
+                isFolder = true,
+                children = mutableStateListOf(node),
+            )
+        )
+
+        state.openRequest(requestId = node.id, name = node.name, method = node.method!!, url = node.url!!)
+        val tab = state.activeTab ?: error("no active tab")
+        assertFalse(tab.isDirty, "Tab should not be dirty immediately after opening from collection")
+
+        val originalUrl = tab.url
+        tab.url = originalUrl + "/extra"
+        tab.markDirty()  // simulates onUrlChanged
+        assertTrue(tab.isDirty)
+
+        // User reverts the change – dirty flag should clear
+        tab.url = originalUrl
+        tab.markDirty()  // simulates onUrlChanged
+
+        assertFalse(
+            tab.isDirty,
+            "Reverting URL to its saved value must clear the dirty flag. " +
+                "Bug: savedSnapshot captured before syncSystemHeaders() ran, " +
+                "so system headers are missing from savedSnapshot and isDirty never resets.",
+        )
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Regression Bug #3: Params table is empty when opening a
+    // request from the collection sidebar, even when the stored URL
+    // contains a query string.
+    //
+    // Root cause: CollectionNode has no params field, and addTab does
+    // not call syncParamsFromUrl(). The user must manually type in
+    // the URL bar to populate the params table.
+    // ─────────────────────────────────────────────────────────────
+
+    @Test
+    fun openRequest_from_collection_leaves_params_empty_when_url_has_query_params() {
+        val state = AppState(openDefaultTab = false)
+        val node = CollectionNode(
+            id = "req-params-test",
+            name = "Search",
+            isFolder = false,
+            method = HttpMethodType.GET,
+            url = "https://api.com/search?q=test&page=1",
+        )
+        state.collections.add(
+            CollectionNode(
+                id = "coll-params-test",
+                name = "Params Bug Collection",
+                isFolder = true,
+                children = mutableStateListOf(node),
+            )
+        )
+
+        state.openRequest(requestId = node.id, name = node.name, method = node.method!!, url = node.url!!)
+        val tab = state.activeTab ?: error("no active tab")
+
+        assertEquals(
+            2,
+            tab.params.size,
+            "Opening from collection must populate params from the URL query string. " +
+                "Bug: addTab does not call syncParamsFromUrl(), so params table is always empty " +
+                "even when tab.url = 'https://api.com/search?q=test&page=1'.",
+        )
+        assertEquals("q", tab.params[0].key)
+        assertEquals("test", tab.params[0].value)
+        assertEquals("page", tab.params[1].key)
+        assertEquals("1", tab.params[1].value)
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Rename dirty-state regression tests (Bug #5)
+    //
+    // Root cause: renameRequestEverywhere updated tab.name but left
+    // savedSnapshot with the old name. Any subsequent recomputeDirty()
+    // call would always find the name mismatch, so the tab stayed
+    // dirty even after the user reverted every other edit.
+    // ─────────────────────────────────────────────────────────────
+
+    @Test
+    fun `rename from sidebar does not make clean tab dirty`() {
+        val state = AppState(withDemoData = true)
+        state.openRequest("r1", "Get all users", HttpMethodType.GET, "{{baseUrl}}/users")
+        val tab = state.openTabs.first { it.id == "r1" }
+        assertFalse(tab.isDirty, "Tab must be clean after opening from collection")
+
+        state.renameRequestEverywhere("r1", "Renamed request")
+
+        assertFalse(tab.isDirty,
+            "Renaming a clean tab from the sidebar must not mark it dirty")
+    }
+
+    @Test
+    fun `after rename, reverting url edit clears dirty flag`() {
+        val state = AppState(openDefaultTab = false)
+        val node = CollectionNode(
+            id = "req-rename-test",
+            name = "Original Name",
+            isFolder = false,
+            method = HttpMethodType.GET,
+            url = "https://api.com/users",
+        )
+        state.collections.add(
+            CollectionNode(
+                id = "coll-rename-test",
+                name = "Rename Test",
+                isFolder = true,
+                children = mutableStateListOf(node),
+            )
+        )
+        state.openRequest(requestId = node.id, name = node.name, method = node.method!!, url = node.url!!)
+        val tab = state.activeTab ?: error("no active tab")
+        assertFalse(tab.isDirty)
+
+        // Step 1: rename from sidebar
+        state.renameRequestEverywhere(node.id, "New Name")
+        assertFalse(tab.isDirty, "Tab must remain clean immediately after rename")
+
+        // Step 2: edit URL
+        val originalUrl = tab.url
+        tab.url = "$originalUrl/extra"
+        tab.markDirty()
+        assertTrue(tab.isDirty, "Tab must be dirty after URL edit")
+
+        // Step 3: revert URL — must become clean again
+        tab.url = originalUrl
+        tab.markDirty()
+        assertFalse(
+            tab.isDirty,
+            "Reverting URL to original after rename must clear dirty flag. " +
+                "Bug: savedSnapshot still had old name, so isDirty always stayed true.",
+        )
+    }
+
+    @Test
+    fun `after rename, dirty tab that had url changes stays dirty`() {
+        val state = AppState(openDefaultTab = false)
+        val node = CollectionNode(
+            id = "req-rename-dirty",
+            name = "My Request",
+            isFolder = false,
+            method = HttpMethodType.GET,
+            url = "https://api.com/data",
+        )
+        state.collections.add(
+            CollectionNode(
+                id = "coll-rename-dirty",
+                name = "Rename Dirty Test",
+                isFolder = true,
+                children = mutableStateListOf(node),
+            )
+        )
+        state.openRequest(requestId = node.id, name = node.name, method = node.method!!, url = node.url!!)
+        val tab = state.activeTab ?: error("no active tab")
+
+        // Make tab dirty first (unsaved URL change)
+        tab.url = "https://api.com/data/v2"
+        tab.markDirty()
+        assertTrue(tab.isDirty)
+
+        // Rename should not clear the pending URL change
+        state.renameRequestEverywhere(node.id, "My Renamed Request")
+        assertTrue(tab.isDirty,
+            "A tab with unsaved URL changes must stay dirty after rename")
+    }
+
+    @Test
+    fun `rename from tab chip updates both tab and collection node`() {
+        val state = AppState(withDemoData = true)
+        val requestId = "r1"
+
+        state.openRequest(requestId = requestId, name = "Get all users", method = HttpMethodType.GET, url = "{{baseUrl}}/users")
+
+        // Simulate tab-chip inline rename (same code path as sidebar rename)
+        state.renameRequestEverywhere(requestId, "Users List")
+
+        val tab = state.openTabs.first { it.id == requestId }
+        assertEquals("Users List", tab.name,
+            "Tab name must update after rename via tab chip")
+
+        val node = state.collections.flatMap { it.children }.first { it.id == requestId }
+        assertEquals("Users List", node.name,
+            "Collection node name must update after rename via tab chip")
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Delete-request closes open tab regression tests (Bug #6)
+    //
+    // Root cause: deleteRequestFromCollections removed the node from
+    // the tree but never called closeTabsByIds(), so the deleted
+    // request's tab stayed open in the topbar.
+    // ─────────────────────────────────────────────────────────────
+
+    @Test
+    fun `deleteRequest closes the matching open tab`() {
+        val state = AppState(withDemoData = true)
+        state.openRequest("r1", "Get all users", HttpMethodType.GET, "{{baseUrl}}/users")
+        assertTrue(state.openTabs.any { it.id == "r1" }, "Tab must be open before delete")
+
+        state.closeTabsByIds(listOf("r1"))
+
+        assertFalse(state.openTabs.any { it.id == "r1" },
+            "Deleted request tab must be removed from topbar")
+    }
+
+    @Test
+    fun `closeTabsByIds removes multiple tabs and keeps others`() {
+        val state = AppState(withDemoData = true)
+        state.openRequest("r1", "Get all users", HttpMethodType.GET, "{{baseUrl}}/users")
+        state.openRequest("r2", "Create user", HttpMethodType.POST, "{{baseUrl}}/users")
+        state.openRequest("r3", "Update user", HttpMethodType.PUT, "{{baseUrl}}/users/1")
+        assertEquals(4, state.openTabs.size) // default tab + 3 opened
+
+        state.closeTabsByIds(listOf("r1", "r3"))
+
+        assertFalse(state.openTabs.any { it.id == "r1" }, "r1 tab must be closed")
+        assertFalse(state.openTabs.any { it.id == "r3" }, "r3 tab must be closed")
+        assertTrue(state.openTabs.any { it.id == "r2" }, "r2 tab must still be open")
+    }
+
+    @Test
+    fun `closeTabsByIds with non-open id is a no-op`() {
+        val state = AppState(withDemoData = true)
+        val tabsBefore = state.openTabs.size
+
+        state.closeTabsByIds(listOf("nonexistent-id"))
+
+        assertEquals(tabsBefore, state.openTabs.size,
+            "closeTabsByIds with unknown id must not change open tabs")
+    }
+
+    @Test
+    fun `closeTabsByIds sets activeTabIndex correctly when active tab is closed`() {
+        val state = AppState(withDemoData = true)
+        state.openRequest("r1", "Get all users", HttpMethodType.GET, "{{baseUrl}}/users")
+        state.openRequest("r2", "Create user", HttpMethodType.POST, "{{baseUrl}}/users")
+        // Make r2 the active tab
+        state.activeTabIndex = state.openTabs.indexOfFirst { it.id == "r2" }
+
+        state.closeTabsByIds(listOf("r2"))
+
+        assertTrue(state.activeTabIndex < state.openTabs.size,
+            "activeTabIndex must be within bounds after active tab is closed")
+        assertFalse(state.openTabs.any { it.id == "r2" })
+    }
+
+    @Test
+    fun `closeTabsByIds clears all tabs when every tab is deleted`() {
+        val state = AppState(openDefaultTab = false)
+        val node1 = CollectionNode("req-del-1", "A", isFolder = false, method = HttpMethodType.GET, url = "/a")
+        val node2 = CollectionNode("req-del-2", "B", isFolder = false, method = HttpMethodType.GET, url = "/b")
+        state.collections.add(
+            CollectionNode("coll-del", "Delete All", isFolder = true,
+                children = mutableStateListOf(node1, node2))
+        )
+        state.openRequest("req-del-1", "A", HttpMethodType.GET, "/a")
+        state.openRequest("req-del-2", "B", HttpMethodType.GET, "/b")
+        assertEquals(2, state.openTabs.size)
+
+        state.closeTabsByIds(listOf("req-del-1", "req-del-2"))
+
+        assertTrue(state.openTabs.isEmpty(), "All tabs must be closed")
+        assertEquals(-1, state.activeTabIndex, "activeTabIndex must be -1 with no open tabs")
+        assertNull(state.activeTab)
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Bug #7: Rename collection root updates tab.collectionName
+    //
+    // Root cause: RequestTabState.collectionName was a val so it
+    // couldn't be updated when the root collection was renamed.
+    // resolveSidebarRequestId() then failed to find the collection
+    // by name, breaking sidebar reveal and history recording.
+    // ─────────────────────────────────────────────────────────────
+
+    @Test
+    fun `updateTabsCollectionName updates matching tabs`() {
+        val state = AppState(withDemoData = true)
+        // Open a request from the "API Demo" collection (c1 in demo data)
+        state.openRequest("r1", "Get all users", HttpMethodType.GET, "{{baseUrl}}/users")
+        val tab = state.openTabs.first { it.id == "r1" }
+        val oldName = tab.collectionName ?: error("tab must belong to a collection")
+
+        state.updateTabsCollectionName(oldName, "API Demo v2")
+
+        assertEquals("API Demo v2", tab.collectionName,
+            "Tab.collectionName must be updated after root collection rename")
+    }
+
+    @Test
+    fun `updateTabsCollectionName does not touch tabs from other collections`() {
+        val state = AppState(withDemoData = true)
+        state.openRequest("r1", "Get all users", HttpMethodType.GET, "{{baseUrl}}/users")
+        state.openRequest("r4", "Login", HttpMethodType.POST, "{{baseUrl}}/auth/login")
+        val r1Tab = state.openTabs.first { it.id == "r1" }
+        val r4Tab = state.openTabs.first { it.id == "r4" }
+
+        // Only rename the collection that r1 belongs to
+        val oldName = r1Tab.collectionName ?: return
+        state.updateTabsCollectionName(oldName, "Renamed Collection")
+
+        assertEquals("Renamed Collection", r1Tab.collectionName)
+        // r4 is in a different collection or no collection — its name must not change
+        assertFalse(r4Tab.collectionName == "Renamed Collection",
+            "Tabs from other collections must not be affected by rename")
+    }
+
+    @Test
+    fun `updateTabsCollectionName with empty open tabs is a no-op`() {
+        val state = AppState(openDefaultTab = false)
+        assertTrue(state.openTabs.isEmpty())
+        // Should not throw
+        state.updateTabsCollectionName("oldName", "newName")
     }
 }

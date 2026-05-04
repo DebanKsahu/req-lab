@@ -3,6 +3,8 @@ package com.reqlab.qa
 import com.reqlab.core.scripting.ReqLabScriptEngine
 import com.reqlab.core.scripting.ScriptContext
 import com.reqlab.core.scripting.ScriptResult
+import com.reqlab.core.scripting.SendRequestResult
+import com.reqlab.core.scripting.SendRequestSpec
 import com.reqlab.server.module
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
@@ -36,6 +38,30 @@ import kotlin.test.assertTrue
 class ScriptingDocsIntegrationTest {
 
     private val engine = ReqLabScriptEngine()
+
+    /**
+     * Script engine wired to the real Ktor client so that [reqlab.sendRequest()]
+     * calls inside scripts make actual HTTP requests to the embedded test server.
+     */
+    private val sendRequestEngine: ReqLabScriptEngine by lazy {
+        ReqLabScriptEngine(
+            sendRequestExecutor = { spec ->
+                val startMs = System.currentTimeMillis()
+                val response = client.request(spec.url) {
+                    method = HttpMethod.parse(spec.method)
+                    spec.headers.forEach { (k, v) -> headers.append(k, v) }
+                    spec.body?.let { setBody(it) }
+                }
+                SendRequestResult(
+                    statusCode = response.status.value,
+                    statusText = response.status.description,
+                    body = response.bodyAsText(),
+                    headers = response.headers.entries().associate { it.key to (it.value.firstOrNull() ?: "") },
+                    elapsedMs = System.currentTimeMillis() - startMs,
+                )
+            }
+        )
+    }
     private val baseUrl get() = BASE_URL
 
     data class MutableRequest(
@@ -295,6 +321,131 @@ class ScriptingDocsIntegrationTest {
         assertTrue(artifacts.testResult.assertions.any { !it.passed })
     }
 
+    // ══════════════════════════════════════════════════════════════════════
+    // E2E: reqlab.sendRequest() — sub-requests from scripts
+    // ══════════════════════════════════════════════════════════════════════
+
+    @Test
+    fun sendRequest_pre_script_fetches_token_and_sets_auth_header_for_protected_endpoint() = runTest {
+        val artifacts = executeWithScripts(
+            preScript = """
+                reqlab.sendRequest({
+                    url: "${baseUrl}/api/token",
+                    method: "POST",
+                    header: [{ key: "Content-Type", value: "application/json" }],
+                    body: { mode: "raw", raw: '{"user":"alice","role":"admin"}' }
+                }, function(err, resp) {
+                    var tok = resp.json().token
+                    reqlab.environment.set("authToken", tok)
+                    reqlab.request.headers.upsert("X-Token", tok)
+                })
+            """.trimIndent(),
+            testScript = """
+                reqlab.test("protected endpoint returns 200 with valid token", function() {
+                    reqlab.expect(reqlab.response.code).to.equal(200)
+                })
+                reqlab.test("response includes decoded user info", function() {
+                    var body = reqlab.response.json()
+                    reqlab.expect(body.decoded).to.include("alice")
+                })
+            """.trimIndent(),
+            initialRequest = MutableRequest("GET", "$baseUrl/api/protected"),
+            scriptEngine = sendRequestEngine,
+        )
+
+        assertTrue(artifacts.preResult.success, "Pre-script failed: ${artifacts.preResult.error}")
+        assertTrue(artifacts.preResult.newVariables.containsKey("authToken"), "Token should be stored in env")
+        assertTrue(artifacts.preResult.requestMutations.headers.containsKey("X-Token"), "X-Token mutation should be set")
+        assertEquals(200, artifacts.responseCode, "Protected endpoint should return 200 with token")
+        assertTrue(artifacts.testResult.success, "Post-test assertions failed")
+    }
+
+    @Test
+    fun sendRequest_string_url_format_gets_json_and_sets_variable() = runTest {
+        val artifacts = executeWithScripts(
+            preScript = """
+                reqlab.sendRequest("${baseUrl}/json/user", function(err, resp) {
+                    var userId = resp.json().id
+                    reqlab.environment.set("fetchedUserId", userId + "")
+                })
+            """.trimIndent(),
+            testScript = "",
+            initialRequest = MutableRequest("GET", "$baseUrl/status/200"),
+            scriptEngine = sendRequestEngine,
+        )
+
+        assertTrue(artifacts.preResult.success, "Pre-script failed: ${artifacts.preResult.error}")
+        assertEquals("1", artifacts.preResult.newVariables["fetchedUserId"],
+            "Should store the user id from the sub-request response")
+    }
+
+    @Test
+    fun sendRequest_callback_assertion_counts_toward_overall_result() = runTest {
+        val artifacts = executeWithScripts(
+            preScript = """
+                reqlab.sendRequest("${baseUrl}/json/user", function(err, resp) {
+                    reqlab.test("user endpoint returns 200", function() {
+                        reqlab.expect(resp.code).to.equal(200)
+                    })
+                    reqlab.test("user has a name field", function() {
+                        reqlab.expect(resp.json().name).to.exist
+                    })
+                })
+            """.trimIndent(),
+            testScript = "",
+            initialRequest = MutableRequest("GET", "$baseUrl/status/200"),
+            scriptEngine = sendRequestEngine,
+        )
+
+        assertTrue(artifacts.preResult.success, "Pre-script should succeed")
+        assertEquals(2, artifacts.preResult.assertions.size, "Both callback assertions should be captured")
+        assertTrue(artifacts.preResult.assertions.all { it.passed }, "Both assertions should pass")
+    }
+
+    @Test
+    fun sendRequest_post_with_body_option_object_stores_response_variable() = runTest {
+        val artifacts = executeWithScripts(
+            preScript = """
+                reqlab.sendRequest({
+                    url: "${baseUrl}/api/token",
+                    method: "POST",
+                    header: [{ key: "Content-Type", value: "application/json" }],
+                    body: { mode: "raw", raw: JSON.stringify({ user: "bob", role: "viewer" }) }
+                }, function(err, resp) {
+                    reqlab.environment.set("bobToken", resp.json().token)
+                    reqlab.environment.set("bobRole", resp.json().role)
+                })
+            """.trimIndent(),
+            testScript = "",
+            initialRequest = MutableRequest("GET", "$baseUrl/status/200"),
+            scriptEngine = sendRequestEngine,
+        )
+
+        assertTrue(artifacts.preResult.success, "Pre-script should succeed")
+        assertTrue(artifacts.preResult.newVariables.containsKey("bobToken"), "Token should be stored")
+        assertEquals("viewer", artifacts.preResult.newVariables["bobRole"], "Role should be 'viewer'")
+    }
+
+    @Test
+    fun sendRequest_invalid_url_appends_error_log_and_does_not_crash() = runTest {
+        val artifacts = executeWithScripts(
+            preScript = """
+                reqlab.sendRequest("http://localhost:1/no-such-server", function(err, resp) {
+                    reqlab.environment.set("should-not-be-set", "yes")
+                })
+            """.trimIndent(),
+            testScript = "",
+            initialRequest = MutableRequest("GET", "$baseUrl/status/200"),
+            scriptEngine = sendRequestEngine,
+        )
+
+        // Pre-script itself should not throw — sendRequest error goes to logs
+        assertFalse(artifacts.preResult.error?.contains("Script execution failed") == true,
+            "Script should not fail entirely due to sendRequest error")
+        assertFalse(artifacts.preResult.newVariables.containsKey("should-not-be-set"),
+            "Variable should not be set when executor throws")
+    }
+
     private suspend fun executeWithScripts(
         preScript: String,
         testScript: String,
@@ -302,6 +453,7 @@ class ScriptingDocsIntegrationTest {
         environment: Map<String, String> = emptyMap(),
         globals: Map<String, String> = emptyMap(),
         collections: Map<String, String> = emptyMap(),
+        scriptEngine: ReqLabScriptEngine = engine,
     ): ScriptRunArtifacts {
         val preContext = ScriptContext(
             url = initialRequest.url,
@@ -314,7 +466,7 @@ class ScriptingDocsIntegrationTest {
             requestBody = initialRequest.body,
         )
 
-        val preResult = engine.executePreRequestScript(preScript, preContext, prefix = "reqlab")
+        val preResult = scriptEngine.executePreRequestScript(preScript, preContext, prefix = "reqlab")
         applyMutations(initialRequest, preResult)
 
         val mergedEnv = environment + preResult.newVariables
@@ -364,7 +516,7 @@ class ScriptingDocsIntegrationTest {
             requestBody = initialRequest.body,
         )
 
-        val testResult = engine.executeTestScript(testScript, testContext, prefix = "reqlab")
+        val testResult = scriptEngine.executeTestScript(testScript, testContext, prefix = "reqlab")
 
         return ScriptRunArtifacts(
             preResult = preResult,

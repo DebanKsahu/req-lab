@@ -8,12 +8,16 @@ import com.reqlab.core.model.HttpMethodType
 import com.reqlab.core.model.KeyValueEntry
 import com.reqlab.core.model.RequestBody
 import com.reqlab.core.model.RequestDefinition
+import com.reqlab.core.network.ApiClient
 import com.reqlab.core.network.NetworkEvent
 import com.reqlab.core.network.NetworkLogger
+import com.reqlab.core.network.NoOpNetworkLogger
 import com.reqlab.core.network.RetryPolicy
 import com.reqlab.core.network.VariableResolver
 import com.reqlab.core.scripting.ReqLabScriptEngine
 import com.reqlab.core.scripting.ScriptContext
+import com.reqlab.core.scripting.SendRequestResult
+import com.reqlab.core.scripting.SendRequestSpec
 import com.reqlab.ui.shared.network.NetworkClientFactory
 import com.reqlab.ui.shared.persistence.TabsRepository
 import com.reqlab.ui.shared.persistence.WorkspaceRepository
@@ -32,8 +36,42 @@ import kotlinx.coroutines.withContext
  * Issues an HTTP request for [tab] and streams the result back into [tab]'s
  * state properties.  All heavy work runs off the main thread.
  */
-private val scriptEngine = ReqLabScriptEngine()
 private const val BINARY_ATTACHMENT_PREFIX = "reqlab-binary:"
+
+/**
+ * Executes a sub-HTTP request from a [reqlab.sendRequest()] script call.
+ * Uses [client] (built from the current AppSettings) to make the real call.
+ */
+private suspend fun executeSubRequest(client: ApiClient, spec: SendRequestSpec): SendRequestResult {
+    val requestDef = RequestDefinition(
+        id = "sr-${spec.url.hashCode()}",
+        name = "sendRequest",
+        method = HttpMethodType.entries.firstOrNull { it.name == spec.method } ?: HttpMethodType.GET,
+        url = spec.url,
+        headers = spec.headers.map { (k, v) -> KeyValueEntry(k, v) },
+        body = spec.body?.let { RequestBody(BodyType.JSON, content = it) } ?: RequestBody(),
+        createdAtEpochMillis = 0L,
+        updatedAtEpochMillis = 0L,
+    )
+    var result = SendRequestResult(statusCode = 0, statusText = "No response received")
+    client.execute(requestDef).collect { event ->
+        when (event) {
+            is NetworkEvent.Success -> result = SendRequestResult(
+                statusCode = event.response.statusCode,
+                statusText = event.response.statusText,
+                body = event.response.bodyText,
+                headers = event.response.headers.associate { it.key to it.value },
+                elapsedMs = event.response.metrics.responseTimeMs,
+            )
+            is NetworkEvent.Failure -> result = SendRequestResult(
+                statusCode = 0,
+                statusText = "Error: ${event.error.message}",
+            )
+            else -> {}
+        }
+    }
+    return result
+}
 
 fun sendRequest(scope: CoroutineScope, state: AppState, tab: RequestTabState) {
     if (tab.url.isBlank()) {
@@ -46,11 +84,21 @@ fun sendRequest(scope: CoroutineScope, state: AppState, tab: RequestTabState) {
     tab.currentJob?.cancel()
 
     val job = scope.launch {
+        // Create a fresh script engine per request, wired to the current settings
+        // so reqlab.sendRequest() sub-calls inherit proxy/timeout configuration.
+        val subReqClient = NetworkClientFactory.build(state.settings, NoOpNetworkLogger, RetryPolicy(maxAttempts = 1))
+        val scriptEngine = ReqLabScriptEngine(
+            sendRequestExecutor = { spec -> executeSubRequest(subReqClient, spec) },
+        )
         tab.isLoading = true
         tab.response  = null
         tab.lastError = null
         state.testResults.clear()
-        var effectiveUrl = tab.url
+        // Strip embedded query string from the URL: tab.params is the single source
+        // of truth for query parameters (syncUrlFromParams embeds them for display,
+        // but passing both to KtorApiClient would cause each param to be appended
+        // twice — once from the parsed URL and once from effectiveQueryParams).
+        var effectiveUrl = tab.url.trim().substringBefore('?')
         var effectiveMethod = tab.method
         val effectiveHeaders = tab.headers
             .filter { it.enabled }
@@ -123,11 +171,17 @@ fun sendRequest(scope: CoroutineScope, state: AppState, tab: RequestTabState) {
             }
         }
 
-        val effectiveUrlForLog = resolveUrlForLog(
+        val resolvedBaseForLog = resolveUrlForLog(
             url = effectiveUrl,
             variableLayers = state.activeVariableLayers(),
             requestScopedVars = requestScopedScriptVars,
         )
+        val effectiveUrlForLog = if (effectiveQueryParams.isNotEmpty()) {
+            val qs = effectiveQueryParams.entries.joinToString("&") { "${it.key}=${it.value}" }
+            "$resolvedBaseForLog?$qs"
+        } else {
+            resolvedBaseForLog
+        }
         state.logNetworkEvent("→ $effectiveMethod $effectiveUrlForLog")
 
         try {
@@ -538,11 +592,15 @@ private fun buildUrlWithParams(
 ): String {
     val enabledParams = tab.params.filter { it.enabled && it.key.isNotBlank() }
     if (enabledParams.isEmpty()) return resolvedBase
-    val separator = if (resolvedBase.contains('?')) "&" else "?"
+    // Strip any embedded query string from resolvedBase: tab.params is the single
+    // source of truth for query parameters (kept in sync by syncParamsFromUrl /
+    // syncUrlFromParams). Appending to a URL that already contains those params
+    // would duplicate every parameter in the final request URL.
+    val base = resolvedBase.substringBefore('?')
     val qs = enabledParams.joinToString("&") { p ->
         "${VariableResolver.resolve(p.key, variableLayers, removeUnresolved)}=${VariableResolver.resolve(p.value, variableLayers, removeUnresolved)}"
     }
-    return "$resolvedBase$separator$qs"
+    return "$base?$qs"
 }
 
 private fun buildHeaderMap(

@@ -31,6 +31,7 @@ kotlin {
                 implementation(project(":sample-server"))
                 implementation(libs.ktor.server.core)
                 implementation(libs.ktor.server.netty)
+                implementation(libs.serialization.json)
             }
         }
     }

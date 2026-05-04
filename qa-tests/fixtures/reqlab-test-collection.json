@@ -53,6 +53,19 @@
           "name": "HEAD Users (check X-Total-Count header)",
           "method": "HEAD",
           "url": "{{baseUrl}}/api/users"
+        },
+        {
+          "name": "TRACE Users (echo headers)",
+          "method": "TRACE",
+          "url": "{{baseUrl}}/api/users",
+          "preRequestScript": "reqlab.request.headers.upsert(\"X-Trace-Test\", \"trace-value\");\nreqlab.console.log(\"Sending TRACE request\");",
+          "testScript": "reqlab.test(\"status is 200\", function() {\n    reqlab.expect(reqlab.response.code).to.equal(200)\n})\nreqlab.test(\"method is TRACE\", function() {\n    reqlab.expect(reqlab.response.json().method).to.equal(\"TRACE\")\n})\nreqlab.test(\"has echoedHeaders\", function() {\n    reqlab.expect(reqlab.response.text()).to.include(\"echoedHeaders\")\n})"
+        },
+        {
+          "name": "CONNECT Users (tunnel simulation)",
+          "method": "CONNECT",
+          "url": "{{baseUrl}}/api/users",
+          "testScript": "reqlab.test(\"status is 200\", function() {\n    reqlab.expect(reqlab.response.code).to.equal(200)\n})\nreqlab.test(\"method is CONNECT\", function() {\n    reqlab.expect(reqlab.response.json().method).to.equal(\"CONNECT\")\n})\nreqlab.test(\"tunnel message present\", function() {\n    reqlab.expect(reqlab.response.json().message).to.include(\"Tunnel established\")\n})"
         }
       ]
     },
@@ -180,30 +193,7 @@
               "url": "{{baseUrl}}/api/form-data",
               "body": {
                 "type": "FORM_DATA",
-                "content": "name=Alice&role=tester&department=engineering",
-                "formDataEntries": [
-                  {
-                    "key": "name",
-                    "type": "TEXT",
-                    "value": "Alice",
-                    "description": "",
-                    "enabled": true
-                  },
-                  {
-                    "key": "role",
-                    "type": "TEXT",
-                    "value": "tester",
-                    "description": "",
-                    "enabled": true
-                  },
-                  {
-                    "key": "department",
-                    "type": "TEXT",
-                    "value": "engineering",
-                    "description": "",
-                    "enabled": true
-                  }
-                ]
+                "content": "name=Alice&role=tester&department=engineering"
               }
             }
           ]
@@ -218,42 +208,7 @@
               "url": "{{baseUrl}}/api/urlencoded",
               "body": {
                 "type": "X_WWW_FORM_URLENCODED",
-                "content": "username=alice&password=secret123&remember=true",
-                "urlencodedEntries": [
-                  {
-                    "key": "username",
-                    "value": "alice",
-                    "description": "",
-                    "enabled": true
-                  },
-                  {
-                    "key": "password",
-                    "value": "secret123",
-                    "description": "",
-                    "enabled": true
-                  },
-                  {
-                    "key": "remember",
-                    "value": "true",
-                    "description": "",
-                    "enabled": true
-                  }
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "GraphQL",
-          "folders": [],
-          "requests": [
-            {
-              "name": "POST GraphQL Query - user by id",
-              "method": "POST",
-              "url": "{{baseUrl}}/api/graphql",
-              "body": {
-                "type": "GRAPHQL",
-                "content": "{\n  \"query\": \"query GetUser($id: ID!) { user(id: $id) { id name type } }\",\n  \"variables\": { \"id\": \"{{graphqlUserId}}\" },\n  \"operationName\": \"GetUser\"\n}"
+                "content": "username=alice&password=secret123&remember=true"
               }
             }
           ]
@@ -288,6 +243,18 @@
               "headers": [
                 { "key": "Content-Type", "value": "application/xml" }
               ]
+            },
+            {
+              "name": "POST XML Body - nested",
+              "method": "POST",
+              "url": "{{baseUrl}}/api/xml",
+              "body": {
+                "type": "XML",
+                "content": "<?xml version=\"1.0\"?>\n<order>\n  <id>101</id>\n  <items>\n    <item>\n      <name>Widget</name>\n      <qty>3</qty>\n    </item>\n  </items>\n</order>"
+              },
+              "headers": [
+                { "key": "Content-Type", "value": "application/xml" }
+              ]
             }
           ]
         },
@@ -301,7 +268,7 @@
               "url": "{{baseUrl}}/api/html",
               "body": {
                 "type": "HTML",
-                "content": "<!DOCTYPE html>\n<html>\n  <body><h1>Hello</h1></body>\n</html>"
+                "content": "<!DOCTYPE html>\n<html>\n  <head><title>Test</title></head>\n  <body>\n    <h1>Hello from ReqLab</h1>\n  </body>\n</html>"
               },
               "headers": [
                 { "key": "Content-Type", "value": "text/html" }
@@ -319,7 +286,7 @@
               "url": "{{baseUrl}}/api/javascript",
               "body": {
                 "type": "JAVASCRIPT",
-                "content": "const data = { msg: 'hello' };\nconsole.log(data);"
+                "content": "// ReqLab test script\nconst data = { message: 'hello', version: 2 };\nconsole.log(JSON.stringify(data));"
               },
               "headers": [
                 { "key": "Content-Type", "value": "application/javascript" }
@@ -550,22 +517,6 @@
           "name": "Slow Response - near-instant 100ms",
           "method": "GET",
           "url": "{{baseUrl}}/api/slow?ms=100"
-        }
-      ]
-    },
-    {
-      "name": "Large Payloads",
-      "folders": [],
-      "requests": [
-        {
-          "name": "GET Large JSON (10mb-sample.json)",
-          "method": "GET",
-          "url": "{{baseUrl}}/api/large-json"
-        },
-        {
-          "name": "GET Large XML (5mb.xml)",
-          "method": "GET",
-          "url": "{{baseUrl}}/api/large-xml"
         }
       ]
     },
@@ -870,6 +821,122 @@
       "name": "Current Server Time",
       "method": "GET",
       "url": "{{baseUrl}}/api/time"
+    }
+  ],
+  "folders": [
+    {
+      "name": "New Script APIs Coverage",
+      "folders": [],
+      "requests": [
+        {
+          "name": "SA01 response.statusOk() – 2xx passes",
+          "method": "GET",
+          "url": "{{baseUrl}}/status/200",
+          "testScript": "reqlab.test(\"statusOk passes for 200\", function() {\n    reqlab.response.statusOk()\n    reqlab.expect(reqlab.response.code).to.equal(200)\n})\nreqlab.test(\"response.to.be.ok chain passes\", function() {\n    reqlab.response.to.be.ok\n    reqlab.expect(true).to.be.true\n})"
+        },
+        {
+          "name": "SA02 response.to.have.status() chain",
+          "method": "GET",
+          "url": "{{baseUrl}}/status/201",
+          "testScript": "reqlab.test(\"to.have.status(201) passes\", function() {\n    reqlab.response.to.have.status(201)\n})\nreqlab.test(\"statusIs direct call\", function() {\n    reqlab.response.statusIs(201)\n})\nreqlab.test(\"statusCode equals 201\", function() {\n    reqlab.expect(reqlab.response.code).to.equal(201)\n})"
+        },
+        {
+          "name": "SA03 response.hasHeader() and to.have.header() chain",
+          "method": "GET",
+          "url": "{{baseUrl}}/headers",
+          "preRequestScript": "reqlab.request.headers.upsert(\"X-Run-Id\", \"header-test-run\");\nreqlab.request.headers.upsert(\"X-Trace-Id\", \"header-trace-123\");",
+          "testScript": "reqlab.test(\"X-Sample-Server header present\", function() {\n    reqlab.response.hasHeader(\"X-Sample-Server\")\n})\nreqlab.test(\"to.have.header chain works\", function() {\n    reqlab.response.to.have.header(\"X-Sample-Server\")\n})\nreqlab.test(\"Content-Type header is present\", function() {\n    reqlab.response.hasHeader(\"Content-Type\")\n})"
+        },
+        {
+          "name": "SA04 variables.has() across scopes",
+          "method": "GET",
+          "url": "{{baseUrl}}/status/200",
+          "preRequestScript": "reqlab.environment.set(\"sa04EnvKey\", \"envVal\");\nreqlab.globals.set(\"sa04GlobalKey\", \"globalVal\");\nreqlab.variables.set(\"sa04ReqKey\", \"reqVal\");",
+          "testScript": "reqlab.test(\"variables.has env key\", function() {\n    reqlab.expect(reqlab.variables.has(\"sa04EnvKey\")).to.be.true\n})\nreqlab.test(\"variables.has global key\", function() {\n    reqlab.expect(reqlab.variables.has(\"sa04GlobalKey\")).to.be.true\n})\nreqlab.test(\"variables.has request key\", function() {\n    reqlab.expect(reqlab.variables.has(\"sa04ReqKey\")).to.be.true\n})\nreqlab.test(\"variables.has missing returns false\", function() {\n    reqlab.expect(reqlab.variables.has(\"sa04Missing\")).to.be.false\n})"
+        },
+        {
+          "name": "SA05 scope.replaceIn() template substitution",
+          "method": "GET",
+          "url": "{{baseUrl}}/status/200",
+          "preRequestScript": "reqlab.environment.set(\"sa05Base\", \"http://localhost:8080\");\nreqlab.environment.set(\"sa05Path\", \"users\");\nreqlab.globals.set(\"sa05Token\", \"abc123\");",
+          "testScript": "reqlab.test(\"environment.replaceIn substitutes template\", function() {\n    var url = reqlab.environment.replaceIn(\"{{sa05Base}}/api/{{sa05Path}}\")\n    reqlab.expect(url).to.equal(\"http://localhost:8080/api/users\")\n})\nreqlab.test(\"globals.replaceIn substitutes template\", function() {\n    var header = reqlab.globals.replaceIn(\"Bearer {{sa05Token}}\")\n    reqlab.expect(header).to.equal(\"Bearer abc123\")\n})\nreqlab.test(\"replaceIn leaves unknown placeholders unchanged\", function() {\n    var result = reqlab.environment.replaceIn(\"{{sa05Base}}/{{unknownKey}}\")\n    reqlab.expect(result).to.include(\"{{unknownKey}}\")\n    reqlab.expect(result).to.include(\"http://localhost:8080\")\n})"
+        },
+        {
+          "name": "SA06 reqlab.info stub fields",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/info",
+          "testScript": "reqlab.test(\"reqlab.info exists\", function() {\n    reqlab.expect(reqlab.info).to.not.be.undefined\n})\nreqlab.test(\"reqlab.info.iteration is 1\", function() {\n    reqlab.expect(reqlab.info.iteration).to.equal(1)\n})\nreqlab.test(\"reqlab.info.iterationCount is 1\", function() {\n    reqlab.expect(reqlab.info.iterationCount).to.equal(1)\n})\nreqlab.test(\"server info endpoint mirrors reqlab.info shape\", function() {\n    var body = reqlab.response.json()\n    reqlab.expect(body).to.have.property(\"requestName\")\n    reqlab.expect(body).to.have.property(\"iteration\")\n    reqlab.expect(body.iteration).to.equal(reqlab.info.iteration)\n})"
+        },
+        {
+          "name": "SA07 iterationData and cookies stubs do not crash",
+          "method": "GET",
+          "url": "{{baseUrl}}/status/200",
+          "testScript": "reqlab.test(\"iterationData.get returns undefined\", function() {\n    reqlab.expect(reqlab.iterationData.get(\"key\")).to.be.undefined\n})\nreqlab.test(\"iterationData.has returns false\", function() {\n    reqlab.expect(reqlab.iterationData.has(\"key\")).to.be.false\n})\nreqlab.test(\"iterationData.toObject returns empty\", function() {\n    reqlab.expect(Object.keys(reqlab.iterationData.toObject()).length).to.equal(0)\n})\nreqlab.test(\"cookies.get returns undefined\", function() {\n    reqlab.expect(reqlab.cookies.get(\"session\")).to.be.undefined\n})\nreqlab.test(\"cookies.jar is callable\", function() {\n    var jar = reqlab.cookies.jar()\n    reqlab.expect(jar.get(\"any\")).to.be.undefined\n})"
+        },
+        {
+          "name": "SA08 globals scope independence from environment",
+          "method": "GET",
+          "url": "{{baseUrl}}/status/200",
+          "preRequestScript": "reqlab.environment.set(\"shared\", \"fromEnv\");\nreqlab.globals.set(\"shared\", \"fromGlobal\");\nreqlab.collectionVariables.set(\"shared\", \"fromColl\");",
+          "testScript": "reqlab.test(\"environment.get returns env value\", function() {\n    reqlab.expect(reqlab.environment.get(\"shared\")).to.equal(\"fromEnv\")\n})\nreqlab.test(\"globals.get returns global value\", function() {\n    reqlab.expect(reqlab.globals.get(\"shared\")).to.equal(\"fromGlobal\")\n})\nreqlab.test(\"collectionVariables.get returns coll value\", function() {\n    reqlab.expect(reqlab.collectionVariables.get(\"shared\")).to.equal(\"fromColl\")\n})\nreqlab.test(\"variables.get resolves env first\", function() {\n    reqlab.expect(reqlab.variables.get(\"shared\")).to.equal(\"fromEnv\")\n})"
+        },
+        {
+          "name": "SA09 scope.clear() removes all values",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/scope-info",
+          "preRequestScript": "reqlab.environment.set(\"clearKey1\", \"val1\");\nreqlab.environment.set(\"clearKey2\", \"val2\");\nreqlab.environment.clear();\nreqlab.globals.set(\"gClearKey\", \"gVal\");\nreqlab.globals.clear();",
+          "testScript": "reqlab.test(\"environment cleared\", function() {\n    reqlab.expect(reqlab.environment.get(\"clearKey1\")).to.be.undefined\n    reqlab.expect(reqlab.environment.get(\"clearKey2\")).to.be.undefined\n})\nreqlab.test(\"globals cleared\", function() {\n    reqlab.expect(reqlab.globals.get(\"gClearKey\")).to.be.undefined\n})\nreqlab.test(\"scope-info endpoint is accessible\", function() {\n    reqlab.expect(reqlab.response.code).to.equal(200)\n    reqlab.expect(reqlab.response.json().supportedScopes).to.include(\"environment\")\n})"
+        },
+        {
+          "name": "SA10 has() on each scope independently",
+          "method": "GET",
+          "url": "{{baseUrl}}/status/200",
+          "preRequestScript": "reqlab.environment.set(\"hasEnvKey\", \"e\");\nreqlab.globals.set(\"hasGlobalKey\", \"g\");\nreqlab.collectionVariables.set(\"hasCollKey\", \"c\");",
+          "testScript": "reqlab.test(\"environment.has true for set key\", function() {\n    reqlab.expect(reqlab.environment.has(\"hasEnvKey\")).to.be.true\n})\nreqlab.test(\"environment.has false for missing key\", function() {\n    reqlab.expect(reqlab.environment.has(\"noSuchKey\")).to.be.false\n})\nreqlab.test(\"globals.has true for set key\", function() {\n    reqlab.expect(reqlab.globals.has(\"hasGlobalKey\")).to.be.true\n})\nreqlab.test(\"collectionVariables.has true for set key\", function() {\n    reqlab.expect(reqlab.collectionVariables.has(\"hasCollKey\")).to.be.true\n})\nreqlab.test(\"collectionVariables.has false for missing key\", function() {\n    reqlab.expect(reqlab.collectionVariables.has(\"missingCollKey\")).to.be.false\n})"
+        },
+        {
+          "name": "SR01 sendRequest – fetch auth token in pre-script (string URL, GET first then POST)",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/protected",
+          "preRequestScript": "// reqlab.sendRequest with options object (POST to token endpoint)\nreqlab.sendRequest({\n    url: \"{{baseUrl}}/api/token\",\n    method: \"POST\",\n    header: [{ key: \"Content-Type\", value: \"application/json\" }],\n    body: { mode: \"raw\", raw: JSON.stringify({ user: \"alice\", role: \"admin\" }) }\n}, function(err, resp) {\n    var tok = resp.json().token\n    reqlab.environment.set(\"authToken\", tok)\n    reqlab.request.headers.upsert(\"X-Token\", tok)\n})",
+          "testScript": "reqlab.test(\"protected endpoint returns 200 after token fetch\", function() {\n    reqlab.expect(reqlab.response.code).to.equal(200)\n})\nreqlab.test(\"auth token was stored in environment\", function() {\n    reqlab.expect(reqlab.environment.get(\"authToken\")).to.exist\n})"
+        },
+        {
+          "name": "SR02 sendRequest – POST with options object (fetch token with body)",
+          "method": "GET",
+          "url": "{{baseUrl}}/status/200",
+          "preRequestScript": "// reqlab.sendRequest with options object – POST with JSON body\nreqlab.sendRequest({\n    url: \"{{baseUrl}}/api/token\",\n    method: \"POST\",\n    header: [{ key: \"Content-Type\", value: \"application/json\" }],\n    body: { mode: \"raw\", raw: JSON.stringify({ user: \"alice\", role: \"admin\" }) }\n}, function(err, resp) {\n    reqlab.environment.set(\"alice_token\", resp.json().token)\n    reqlab.environment.set(\"alice_role\", resp.json().role)\n})",
+          "testScript": "reqlab.test(\"alice_token was set by sendRequest callback\", function() {\n    reqlab.expect(reqlab.environment.get(\"alice_token\")).to.exist\n})\nreqlab.test(\"alice_role equals admin\", function() {\n    reqlab.expect(reqlab.environment.get(\"alice_role\")).to.equal(\"admin\")\n})"
+        },
+        {
+          "name": "SR03 sendRequest – callback assertions in post-test script",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/token",
+          "preRequestScript": "",
+          "testScript": "// Calling sendRequest in a test script to validate a secondary endpoint\nreqlab.sendRequest(\"{{baseUrl}}/json/user\", function(err, resp) {\n    reqlab.test(\"secondary user endpoint returns 200\", function() {\n        reqlab.expect(resp.code).to.equal(200)\n    })\n    reqlab.test(\"user has an id field\", function() {\n        reqlab.expect(resp.json().id).to.exist\n    })\n})"
+        },
+        {
+          "name": "SR04 sendRequest – chain token fetch then access protected chain data",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/chain/data",
+          "preRequestScript": "// Step 1: obtain a chain-style bearer token via sendRequest\nreqlab.sendRequest({\n    url: \"{{baseUrl}}/api/chain/token\",\n    method: \"POST\",\n    header: [{ key: \"Content-Type\", value: \"application/json\" }],\n    body: { mode: \"raw\", raw: JSON.stringify({ username: \"alice\" }) }\n}, function(err, resp) {\n    var token = resp.json().token\n    reqlab.environment.set(\"chainToken\", token)\n    // Step 2: inject Bearer token so the main GET /api/chain/data succeeds\n    reqlab.request.headers.upsert(\"Authorization\", \"Bearer \" + token)\n})",
+          "testScript": "reqlab.test(\"chain data endpoint returns 200 after token fetch\", function() {\n    reqlab.expect(reqlab.response.code).to.equal(200)\n})\nreqlab.test(\"chain token was stored in environment\", function() {\n    reqlab.expect(reqlab.environment.get(\"chainToken\")).to.exist\n})\nreqlab.test(\"response contains protected data\", function() {\n    reqlab.expect(reqlab.response.json().data).to.exist\n})"
+        },
+        {
+          "name": "SR05 sendRequest – user lookup by ID to inject role header",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/echo-full",
+          "preRequestScript": "// Look up user #1 and inject their role into the main request headers\nreqlab.sendRequest(\"{{baseUrl}}/api/users/1\", function(err, resp) {\n    var user = resp.json()\n    reqlab.environment.set(\"lookedUpUser\", user.name)\n    reqlab.environment.set(\"lookedUpRole\", user.role)\n    reqlab.request.headers.upsert(\"X-User-Role\", user.role)\n    reqlab.request.headers.upsert(\"X-User-Name\", user.name)\n})",
+          "testScript": "reqlab.test(\"user role header was injected by sendRequest\", function() {\n    var headers = reqlab.response.json().headers\n    reqlab.expect(headers[\"X-User-Role\"]).to.equal(\"admin\")\n    reqlab.expect(headers[\"X-User-Name\"]).to.equal(\"Alice\")\n})\nreqlab.test(\"looked-up variables are stored\", function() {\n    reqlab.expect(reqlab.environment.get(\"lookedUpRole\")).to.equal(\"admin\")\n})"
+        },
+        {
+          "name": "SR06 sendRequest – multiple sequential sub-requests accumulate variables",
+          "method": "GET",
+          "url": "{{baseUrl}}/status/200",
+          "preRequestScript": "// Fetch three users and store their roles in environment variables\nreqlab.sendRequest(\"{{baseUrl}}/api/users/1\", function(err, resp) {\n    reqlab.environment.set(\"user1Role\", resp.json().role)\n})\nreqlab.sendRequest(\"{{baseUrl}}/api/users/2\", function(err, resp) {\n    reqlab.environment.set(\"user2Role\", resp.json().role)\n})\nreqlab.sendRequest(\"{{baseUrl}}/api/users/3\", function(err, resp) {\n    reqlab.environment.set(\"user3Role\", resp.json().role)\n})",
+          "testScript": "reqlab.test(\"all user roles were fetched by sendRequest\", function() {\n    reqlab.expect(reqlab.environment.get(\"user1Role\")).to.equal(\"admin\")\n    reqlab.expect(reqlab.environment.get(\"user2Role\")).to.equal(\"user\")\n    reqlab.expect(reqlab.environment.get(\"user3Role\")).to.equal(\"moderator\")\n})"
+        }
+      ]
     }
   ]
 }

@@ -15,6 +15,32 @@ data class ScriptResult(
     val requestMutations: ScriptRequestMutations = ScriptRequestMutations(),
 )
 
+/**
+ * Specification for a sub-HTTP request queued by [reqlab.sendRequest()] inside a script.
+ * The Kotlin engine processes these after the main script phase completes.
+ */
+@Serializable
+data class SendRequestSpec(
+    val url: String,
+    val method: String = "GET",
+    val headers: Map<String, String> = emptyMap(),
+    val body: String? = null,
+    /** Serialized JS callback source — captured via `callback.toString()` in the IIFE. */
+    val callbackSource: String? = null,
+)
+
+/**
+ * HTTP response returned to the engine after a [SendRequestSpec] sub-request is executed.
+ */
+@Serializable
+data class SendRequestResult(
+    val statusCode: Int,
+    val statusText: String = "",
+    val body: String = "",
+    val headers: Map<String, String> = emptyMap(),
+    val elapsedMs: Long = 0,
+)
+
 @Serializable
 data class ScriptRequestMutations(
     val url: String? = null,

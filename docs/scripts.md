@@ -146,6 +146,11 @@ Supported chain words:
 | `response.json()` | object \| array \| null | parses JSON body |
 | `response.headers.get(name)` | string \| undefined | case-insensitive header lookup |
 | `response.statusIs(code)` | void | throws if status code differs |
+| `response.statusOk()` | void | throws if status is not 2xx |
+| `response.hasHeader(name, value?)` | void | throws if header absent or value mismatches |
+| `response.to.have.status(code)` | void | Postman-compatible chain — calls `statusIs(code)` |
+| `response.to.have.header(name, value?)` | void | Postman-compatible chain — calls `hasHeader(name, value?)` |
+| `response.to.be.ok` | void | Postman-compatible chain — calls `statusOk()` |
 
 Notes:
 
@@ -196,6 +201,7 @@ ReqLab exposes four variable scopes.
 | `reqlab.environment.clear()` |
 | `reqlab.environment.has(key)` |
 | `reqlab.environment.toObject()` |
+| `reqlab.environment.replaceIn(template)` |
 
 ### Global scope
 
@@ -207,6 +213,7 @@ ReqLab exposes four variable scopes.
 | `reqlab.globals.clear()` |
 | `reqlab.globals.has(key)` |
 | `reqlab.globals.toObject()` |
+| `reqlab.globals.replaceIn(template)` |
 
 ### Collection scope
 
@@ -218,6 +225,7 @@ ReqLab exposes four variable scopes.
 | `reqlab.collectionVariables.clear()` |
 | `reqlab.collectionVariables.has(key)` |
 | `reqlab.collectionVariables.toObject()` |
+| `reqlab.collectionVariables.replaceIn(template)` |
 
 ### Request-local merged scope (`variables`)
 
@@ -226,6 +234,7 @@ ReqLab exposes four variable scopes.
 | `reqlab.variables.get(key)` |
 | `reqlab.variables.set(key, value)` |
 | `reqlab.variables.unset(key)` |
+| `reqlab.variables.has(key)` |
 
 `reqlab.variables.get(key)` resolution order:
 
@@ -233,6 +242,8 @@ ReqLab exposes four variable scopes.
 2. environment scope
 3. collection scope
 4. global scope
+
+`reqlab.variables.has(key)` checks all four scopes in the same order.
 
 ---
 
@@ -247,6 +258,136 @@ Notes:
 
 - `null` and `undefined` are logged safely.
 - Objects are JSON-stringified; circular objects are logged as `[Object]` fallback.
+
+---
+
+## 2.7 Info API (`reqlab.info`)
+
+Read-only metadata about the current script execution context.
+
+| API | Type | Description |
+|---|---|---|
+| `reqlab.info.requestName` | string | Name of the current request (empty string) |
+| `reqlab.info.requestId` | string | Internal request ID (empty string) |
+| `reqlab.info.iteration` | number | Current iteration number (1-based) |
+| `reqlab.info.iterationCount` | number | Total number of iterations (1) |
+| `reqlab.info.eventName` | string | Script event name (empty string) |
+
+Note: These are stub values. ReqLab does not have a collection runner, so iteration-related fields always return their default.
+
+---
+
+## 2.8 Stub APIs (`reqlab.iterationData`, `reqlab.cookies`)
+
+These APIs are present to prevent runtime errors when importing Postman collections that use them. They do not provide real data.
+
+### `reqlab.iterationData`
+
+| API | Returns |
+|---|---|
+| `.get(key)` | always `undefined` |
+| `.has(key)` | always `false` |
+| `.toObject()` | always `{}` |
+
+### `reqlab.cookies`
+
+| API | Returns |
+|---|---|
+| `.get(name)` | always `undefined` |
+| `.has(name)` | always `false` |
+| `.jar()` | returns a no-op jar object with `.get()`, `.set()`, `.unset()`, `.clear()` |
+
+---
+
+## 2.9 `reqlab.sendRequest()` — HTTP sub-requests from scripts
+
+`reqlab.sendRequest()` lets you make a real HTTP request from inside a pre-request or test script. The callback runs after the HTTP response arrives, and any `reqlab.test()` assertions or `reqlab.environment.set()` calls inside the callback are merged into the overall script result.
+
+### Signature
+
+```javascript
+reqlab.sendRequest(urlOrOptions, callback)
+```
+
+### String URL form (simple GET)
+
+```javascript
+reqlab.sendRequest("https://api.example.com/token", function(err, resp) {
+    reqlab.environment.set("token", resp.json().token)
+})
+```
+
+### Options object form (POST with body and headers)
+
+```javascript
+reqlab.sendRequest({
+    url: reqlab.variables.get("baseUrl") + "/auth",
+    method: "POST",
+    header: [{ key: "Content-Type", value: "application/json" }],
+    body: {
+        mode: "raw",
+        raw: JSON.stringify({ user: "alice", password: "s3cr3t" })
+    }
+}, function(err, resp) {
+    reqlab.environment.set("authToken", resp.json().access_token)
+})
+```
+
+### Options object fields
+
+| Field | Type | Description |
+|---|---|---|
+| `url` | string | Request URL (required) |
+| `method` | string | HTTP method, default `"GET"` |
+| `header` | array or object | Headers — array of `{key, value}` objects or plain key/value map |
+| `headers` | object | Alternative header map (same as `header` when it's an object) |
+| `body` | string or `{raw, mode}` | Request body. Pass a string directly or a Postman-style `{mode:"raw", raw:"..."}` object |
+
+### Callback response object (`resp`)
+
+| Property/Method | Description |
+|---|---|
+| `resp.code` | HTTP status code (integer) |
+| `resp.status` | Status text, e.g. `"OK"` |
+| `resp.responseTime` | Elapsed milliseconds |
+| `resp.json()` | Parses response body as JSON |
+| `resp.text()` | Returns raw response body as string |
+| `resp.headers.get(name)` | Returns a response header by name (case-insensitive) |
+
+### Using assertions in the callback
+
+Assertions added inside the callback contribute to the overall test result:
+
+```javascript
+reqlab.sendRequest("{{baseUrl}}/api/token", function(err, resp) {
+    reqlab.test("token endpoint returns 200", function() {
+        reqlab.expect(resp.code).to.equal(200)
+    })
+    reqlab.test("token is present", function() {
+        reqlab.expect(resp.json().token).to.exist
+    })
+})
+```
+
+### Typical pattern: fetch auth token before the main request
+
+```javascript
+// Pre-request script
+reqlab.sendRequest({
+    url: reqlab.variables.get("baseUrl") + "/api/token",
+    method: "POST",
+    header: [{ key: "Content-Type", value: "application/json" }],
+    body: { mode: "raw", raw: JSON.stringify({ user: "alice", role: "admin" }) }
+}, function(err, resp) {
+    var tok = resp.json().token
+    reqlab.environment.set("authToken", tok)
+    reqlab.request.headers.upsert("Authorization", "Bearer " + tok)
+})
+```
+
+### Error handling
+
+If the sub-request fails (network error, invalid URL), the error is appended to the script logs and the callback is not invoked. The main script continues normally.
 
 ---
 
@@ -363,19 +504,36 @@ When a Postman collection is imported, ReqLab automatically rewrites all `pm.*` 
 |---|---|---|
 | `pm.test(name, fn)` | `reqlab.test(name, fn)` | |
 | `pm.expect(v)` | `reqlab.expect(v)` | |
-| `pm.response` | `reqlab.response` | Full object reference |
+| `pm.response.to.have.status(code)` | `reqlab.response.statusIs(code)` | Converted before generic `pm.response` replacement |
+| `pm.response.to.have.header(name)` | `reqlab.response.hasHeader(name)` | |
+| `pm.response.to.be.ok` | `reqlab.response.statusOk()` | |
+| `pm.response` | `reqlab.response` | Catch-all for remaining `pm.response.*` access |
 | `pm.request` | `reqlab.request` | Full object reference |
 | `pm.environment.get(k)` | `reqlab.environment.get(k)` | |
 | `pm.environment.set(k, v)` | `reqlab.environment.set(k, v)` | |
 | `pm.environment.unset(k)` | `reqlab.environment.unset(k)` | |
-| `pm.globals.get(k)` | `reqlab.environment.get(k)` | Globals map to env scope |
-| `pm.globals.set(k, v)` | `reqlab.environment.set(k, v)` | |
-| `pm.globals.unset(k)` | `reqlab.environment.unset(k)` | |
-| `pm.variables.get(k)` | `reqlab.environment.get(k)` | |
-| `pm.collectionVariables.get(k)` | `reqlab.environment.get(k)` | |
-| `pm.collectionVariables.set(k, v)` | `reqlab.environment.set(k, v)` | |
-| `pm.collectionVariables.unset(k)` | `reqlab.environment.unset(k)` | |
-| `pm.sendRequest(...)` | *commented out* | Not supported in ReqLab |
+| `pm.environment.clear()` | `reqlab.environment.clear()` | |
+| `pm.environment.has(k)` | `reqlab.environment.has(k)` | |
+| `pm.globals.get(k)` | `reqlab.globals.get(k)` | Preserved in globals scope |
+| `pm.globals.set(k, v)` | `reqlab.globals.set(k, v)` | |
+| `pm.globals.unset(k)` | `reqlab.globals.unset(k)` | |
+| `pm.globals.clear()` | `reqlab.globals.clear()` | |
+| `pm.globals.has(k)` | `reqlab.globals.has(k)` | |
+| `pm.collectionVariables.get(k)` | `reqlab.collectionVariables.get(k)` | Preserved in collection scope |
+| `pm.collectionVariables.set(k, v)` | `reqlab.collectionVariables.set(k, v)` | |
+| `pm.collectionVariables.unset(k)` | `reqlab.collectionVariables.unset(k)` | |
+| `pm.collectionVariables.clear()` | `reqlab.collectionVariables.clear()` | |
+| `pm.collectionVariables.has(k)` | `reqlab.collectionVariables.has(k)` | |
+| `pm.variables.get(k)` | `reqlab.variables.get(k)` | Merged scope with priority resolution |
+| `pm.variables.set(k, v)` | `reqlab.variables.set(k, v)` | |
+| `pm.variables.unset(k)` | `reqlab.variables.unset(k)` | |
+| `pm.variables.has(k)` | `reqlab.variables.has(k)` | |
+| `pm.info` | `reqlab.info` | Stub — see Section 2.7 |
+| `pm.iterationData` | `reqlab.iterationData` | Stub — see Section 2.8 |
+| `pm.cookies` | `reqlab.cookies` | Stub — see Section 2.8 |
+| `pm.execution.setNextRequest(req)` | *commented out* | Collection runner flow control; not applicable |
+| `pm.execution.skipRequest()` | *commented out* | Collection runner flow control; not applicable |
+| `pm.sendRequest(url, cb)` | `reqlab.sendRequest(url, cb)` | Fully supported — see Section 2.9 |
 
 ### 8.2 Legacy `postman.*` API (Postman pre-v6)
 
@@ -387,11 +545,11 @@ Collections exported from older versions of Postman use a `postman.*` namespace 
 | `postman.getEnvironmentVariable(k)` | `reqlab.environment.get(k)` | |
 | `postman.clearEnvironmentVariable(k)` | `reqlab.environment.unset(k)` | |
 | `postman.clearEnvironmentVariables()` | `reqlab.environment.clear()` | |
-| `postman.setGlobalVariable(k, v)` | `reqlab.environment.set(k, v)` | Globals map to env scope |
-| `postman.getGlobalVariable(k)` | `reqlab.environment.get(k)` | |
-| `postman.clearGlobalVariable(k)` | `reqlab.environment.unset(k)` | |
-| `postman.clearGlobalVariables()` | `reqlab.environment.clear()` | |
-| `postman.setNextRequest(req)` | *commented out* | Collection runner flow control; not applicable |
+| `postman.setGlobalVariable(k, v)` | `reqlab.globals.set(k, v)` | Preserved in globals scope |
+| `postman.getGlobalVariable(k)` | `reqlab.globals.get(k)` | |
+| `postman.clearGlobalVariable(k)` | `reqlab.globals.unset(k)` | |
+| `postman.clearGlobalVariables()` | `reqlab.globals.clear()` | |
+| `postman.setNextRequest(req)` | *commented out* | Collection-runner flow control; not applicable |
 | `responseBody` (global string) | `response.text()` | Old sandbox global |
 | `responseCode.code` (global object) | `response.code` | Old sandbox global |
 | `responseCode.name` | `response.status` | Old sandbox global |
@@ -431,9 +589,8 @@ if (response.code === 200) {
 
 | Feature | Why |
 |---|---|
-| `pm.sendRequest(url, cb)` | Asynchronous; commented out on import — manual refactor needed |
 | `postman.setNextRequest(req)` | Collection-runner flow control; no equivalent in ReqLab |
-| `pm.iterationData.*` | Collection-runner data files; no equivalent |
-| `pm.info.*` | Runner metadata; no equivalent |
-| Complex Postman test helpers (`pm.response.to.have.status`)| Use `reqlab.expect(response.code).to.equal(N)` instead |
+| `pm.execution.setNextRequest(req)` | Collection-runner flow control; commented out on import |
+| `pm.execution.skipRequest()` | Collection-runner flow control; commented out on import |
 
+> **Note:** `pm.sendRequest()` is fully supported and translated to `reqlab.sendRequest()` on import. See [Section 2.9](#29-reqlabsendrequest--http-sub-requests-from-scripts) for the complete API reference.

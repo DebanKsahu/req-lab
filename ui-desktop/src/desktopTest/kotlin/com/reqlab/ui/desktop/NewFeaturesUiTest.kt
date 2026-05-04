@@ -253,6 +253,48 @@ class NewFeaturesUiTest {
     }
 
     @Test
+    fun delete_request_closes_open_tab_in_topbar() {
+        val state = AppState(withDemoData = true).apply { settings.confirmBeforeDelete = false }
+        composeRule.setContent { MainScreen(state) }
+
+        // Open r1 as a tab
+        composeRule.onNodeWithText("Get all users", useUnmergedTree = true).performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("tab-chip-r1", useUnmergedTree = true).assertIsDisplayed()
+
+        // Delete r1 via the sidebar context menu
+        composeRule.onNodeWithTag("collection-actions-r1", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithText("Delete Request", useUnmergedTree = true).performClick()
+        composeRule.waitForIdle()
+
+        // Tab chip must be gone from the topbar
+        composeRule.onNodeWithTag("tab-chip-r1", useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun delete_collection_closes_all_its_open_tabs_in_topbar() {
+        val state = AppState(withDemoData = true).apply { settings.confirmBeforeDelete = false }
+        composeRule.setContent { MainScreen(state) }
+
+        // Open two requests from the "Users API" collection (c1 contains r1, r2, r3)
+        composeRule.onNodeWithText("Get all users", useUnmergedTree = true).performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Create user", useUnmergedTree = true).performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("tab-chip-r1", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithTag("tab-chip-r2", useUnmergedTree = true).assertIsDisplayed()
+
+        // Delete the entire collection via its context menu
+        composeRule.onNodeWithTag("collection-actions-c1", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithText("Delete", useUnmergedTree = true).performClick()
+        composeRule.waitForIdle()
+
+        // Both tab chips must be removed from the topbar
+        composeRule.onNodeWithTag("tab-chip-r1", useUnmergedTree = true).assertDoesNotExist()
+        composeRule.onNodeWithTag("tab-chip-r2", useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    @Test
     fun add_request_updates_ui_immediately() {
         val state = AppState(withDemoData = true).apply { settings.confirmBeforeDelete = false }
         val before = state.collections.first().children.size

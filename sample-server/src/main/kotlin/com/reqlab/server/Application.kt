@@ -25,12 +25,14 @@ import io.ktor.server.response.respondText
 import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.head
+import io.ktor.server.routing.method
 import io.ktor.server.routing.options
 import io.ktor.server.routing.patch
 import io.ktor.server.routing.post
 import io.ktor.server.routing.put
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
+import io.ktor.http.HttpMethod
 import io.ktor.server.websocket.WebSockets
 import io.ktor.server.websocket.webSocket
 import io.ktor.serialization.kotlinx.json.json
@@ -247,9 +249,96 @@ fun Application.module() {
                 call.response.header("X-Api-Version", "1.0")
                 call.respond(HttpStatusCode.OK)
             }
+
+            // TRACE — echo request method + headers back (like a real TRACE response)
+            method(HttpMethod("TRACE")) {
+                handle {
+                    call.response.header("Content-Type", "message/http")
+                    call.respond(buildJsonObject {
+                        put("method", "TRACE")
+                        put("url", call.request.local.uri)
+                        put("echoedHeaders", buildJsonObject {
+                            call.request.headers.entries().forEach { (k, v) ->
+                                put(k, v.firstOrNull() ?: "")
+                            }
+                        })
+                    })
+                }
+            }
+
+            // CONNECT — returns 200 with a tunnel-established message (can't do real tunnelling)
+            method(HttpMethod("CONNECT")) {
+                handle {
+                    call.respond(buildJsonObject {
+                        put("method", "CONNECT")
+                        put("message", "Tunnel established (simulation)")
+                        put("target", call.request.local.uri)
+                    })
+                }
+            }
+        }
+
+        // ── Standalone TRACE / CONNECT endpoints ───────────────────────────
+        /**
+         * TRACE /api/trace
+         * Echoes back method, URL, and request headers as a diagnostic tool.
+         * Useful for verifying pre-request header injection in scripts.
+         */
+        route("/api/trace") {
+            method(HttpMethod("TRACE")) {
+                handle {
+                    call.response.header("Content-Type", "message/http")
+                    call.respond(buildJsonObject {
+                        put("method", "TRACE")
+                        put("url", call.request.local.uri)
+                        put("echoedHeaders", buildJsonObject {
+                            call.request.headers.entries().forEach { (k, v) ->
+                                put(k, v.firstOrNull() ?: "")
+                            }
+                        })
+                        put("message", "TRACE echo — inspect echoedHeaders to verify your request")
+                    })
+                }
+            }
+        }
+
+        /**
+         * CONNECT /api/connect
+         * Returns a 200 "tunnel established" simulation response.
+         * Real CONNECT tunnelling is not applicable in a REST test server.
+         */
+        route("/api/connect") {
+            method(HttpMethod("CONNECT")) {
+                handle {
+                    call.respond(buildJsonObject {
+                        put("method", "CONNECT")
+                        put("message", "Tunnel established (simulation)")
+                        put("target", call.request.local.uri)
+                    })
+                }
+            }
         }
 
         // ── Query Params ───────────────────────────────────────────────────
+
+        // Returns raw query string info including multi-value detection.
+        // Used by integration tests to verify params are not duplicated.
+        get("/api/echo-query") {
+            val params = call.request.queryParameters
+            call.respond(buildJsonObject {
+                put("paramCounts", buildJsonObject {
+                    params.names().forEach { name ->
+                        put(name, params.getAll(name)?.size ?: 0)
+                    }
+                })
+                put("params", buildJsonObject {
+                    params.names().forEach { name ->
+                        put(name, params[name] ?: "")
+                    }
+                })
+            })
+        }
+
         get("/api/search") {
             val params = call.request.queryParameters
             val q     = params["q"]     ?: ""
@@ -646,6 +735,91 @@ fun Application.module() {
             })
         }
 
+        // ── sendRequest chain demo endpoints ──────────────────────────────
+
+        /**
+         * POST /api/chain/token
+         * Issues a simple bearer token from `{"username":"..."}`.
+         * Designed for `reqlab.sendRequest()` demos: a pre-request script can POST
+         * here to obtain a token before the main request runs.
+         *
+         * Request body (JSON): {"username": "alice"}
+         * Response: {"token": "...", "username": "alice", "expiresIn": 3600}
+         */
+        post("/api/chain/token") {
+            val body = runCatching { call.receiveText() }.getOrDefault("{}")
+            val username = Regex(""""username"\s*:\s*"([^"]+)"""").find(body)?.groupValues?.get(1) ?: "guest"
+            val token = "chain.${Base64.getEncoder().encodeToString("$username:${System.currentTimeMillis()}".toByteArray())}"
+            call.respond(buildJsonObject {
+                put("token",     token)
+                put("username",  username)
+                put("expiresIn", 3600)
+            })
+        }
+
+        /**
+         * GET /api/chain/data
+         * Requires `Authorization: Bearer <token>` header (obtained from /api/chain/token).
+         * Returns 401 if header is missing, 200 with decoded username if present.
+         *
+         * Demonstrates the classic sendRequest auth-then-fetch pattern.
+         */
+        get("/api/chain/data") {
+            val authHeader = call.request.header("Authorization") ?: ""
+            if (!authHeader.startsWith("Bearer chain.")) {
+                call.respond(HttpStatusCode.Unauthorized, buildJsonObject {
+                    put("error",   "Missing or invalid Authorization header")
+                    put("hint",    "Use a pre-request script: reqlab.sendRequest to POST /api/chain/token, then set Authorization header")
+                })
+            } else {
+                val encoded = authHeader.removePrefix("Bearer chain.")
+                val decoded = runCatching {
+                    String(Base64.getDecoder().decode(encoded))
+                }.getOrDefault(encoded)
+                val username = decoded.substringBefore(":")
+                call.respond(buildJsonObject {
+                    put("message",  "Chain access granted")
+                    put("username", username)
+                    put("data",     buildJsonObject {
+                        put("items",    buildJsonArray { add("alpha"); add("beta"); add("gamma") })
+                        put("total",    3)
+                        put("resource", "chain-protected-data")
+                    })
+                })
+            }
+        }
+
+        /**
+         * GET /api/users/{id}
+         * Returns a single user by numeric ID (1–3).
+         * Useful for sendRequest chaining: a script can look up a user then inject
+         * the user's role or email into the main request headers.
+         *
+         * Response: {"id": 1, "name": "Alice", "email": "alice@example.com", "role": "admin"}
+         */
+        get("/api/users/{id}") {
+            val id = call.parameters["id"]?.toIntOrNull()
+            val users = mapOf(
+                1 to Triple("Alice", "alice@example.com", "admin"),
+                2 to Triple("Bob",   "bob@example.com",   "user"),
+                3 to Triple("Carol", "carol@example.com", "moderator"),
+            )
+            val user = users[id]
+            if (user == null) {
+                call.respond(HttpStatusCode.NotFound, buildJsonObject {
+                    put("error", "User $id not found")
+                    put("validIds", buildJsonArray { add(1); add(2); add(3) })
+                })
+            } else {
+                call.respond(buildJsonObject {
+                    put("id",    id)
+                    put("name",  user.first)
+                    put("email", user.second)
+                    put("role",  user.third)
+                })
+            }
+        }
+
         /**
          * GET /api/echo-full
          * Echoes method, URL, all headers, and query parameters back to the caller.
@@ -844,6 +1018,39 @@ module.exports = api;""",
                 HttpStatusCode.OK,
             )
         }
+        /**
+         * GET /api/scope-info
+         * Returns information about all scripting variable scopes.
+         * Useful as a post-request endpoint when testing has/clear/replaceIn APIs.
+         */
+        get("/api/scope-info") {
+            call.respond(buildJsonObject {
+                put("message", "Use this endpoint to test variable scope scripting APIs")
+                put("supportedScopes", buildJsonArray {
+                    add("environment"); add("globals"); add("collectionVariables"); add("variables")
+                })
+                put("supportedMethods", buildJsonArray {
+                    add("get"); add("set"); add("unset"); add("has"); add("clear"); add("toObject"); add("replaceIn")
+                })
+            })
+        }
+
+        /**
+         * GET /api/info
+         * Returns stub values that mirror reqlab.info fields.
+         * Useful for testing pm.info migration: reqlab.info.requestName etc.
+         */
+        get("/api/info") {
+            call.respond(buildJsonObject {
+                put("requestName", "")
+                put("requestId", "")
+                put("iteration", 1)
+                put("iterationCount", 1)
+                put("eventName", "")
+                put("message", "Mirrors reqlab.info stub fields")
+            })
+        }
+
         // ── WebSocket – echo ───────────────────────────────────────────────
         webSocket("/ws") {
             send(Frame.Text("Connected to ReqLab WebSocket echo server. Send any message and it will be echoed."))

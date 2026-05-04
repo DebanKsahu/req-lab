@@ -138,7 +138,10 @@ object TabsRepository {
                 )
                 tab.bodyType    = safeEnum(obj["bodyType"]?.jsonPrimitive?.content, BodyType.JSON)
                 tab.lastRawSubtype = safeEnum(obj["lastRawSubtype"]?.jsonPrimitive?.content, BodyType.JSON)
-                tab.bodyContent = obj["bodyContent"]?.jsonPrimitive?.content ?: ""
+                // Only set bodyContent when non-blank. Setting it to "" would insert a
+                // blank entry (e.g. "NONE=") into bodyContents, making allBodyContentsSnapshot
+                // differ from the saved snapshot that had an empty map → false dirty state.
+                obj["bodyContent"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }?.let { tab.bodyContent = it }
                 obj["bodyContents"]?.jsonObject?.forEach { (typeName, contentEl) ->
                     runCatching { BodyType.valueOf(typeName) }.getOrNull()?.let { type ->
                         tab.bodyContents[type] = contentEl.jsonPrimitive.content
@@ -167,18 +170,20 @@ object TabsRepository {
                     tab.headers.addAll(savedHeaders)
                 }
 
-                tab.restoreSavedSnapshot(
-                    snapshot = obj["savedSnapshot"]?.jsonPrimitive?.content,
-                    legacyDirtyFlag = obj["isDirty"]?.jsonPrimitive?.booleanOrNull ?: false,
-                )
-
-                // Load structured form rows (may be absent in older saves → empty list)
+                // Load form rows BEFORE restoreSavedSnapshot so that recomputeDirty()
+                // sees the complete state when comparing against the persisted savedSnapshot.
+                // (May be absent in older saves → empty list.)
                 obj["formRows"]?.jsonArray?.forEach { el ->
                     tab.formRows.add(formRowFromJson(el.jsonObject))
                 }
                 obj["urlencodedRows"]?.jsonArray?.forEach { el ->
                     tab.urlencodedRows.add(formRowFromJson(el.jsonObject))
                 }
+
+                tab.restoreSavedSnapshot(
+                    snapshot = obj["savedSnapshot"]?.jsonPrimitive?.content,
+                    legacyDirtyFlag = obj["isDirty"]?.jsonPrimitive?.booleanOrNull ?: false,
+                )
 
                 state.openTabs.add(tab)
             }

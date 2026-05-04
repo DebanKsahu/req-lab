@@ -404,4 +404,82 @@ class ImportExportRepositoryTest {
         assertEquals(false, target.collectionExpandedState[restoredFolder.id],
             "Folder collapsed state must survive workspace restart")
     }
+
+    // ── TRACE and CONNECT round-trip ───────────────────────────────────────────
+
+    @Test
+    fun `TRACE request survives collection export and import`() {
+        val request = CollectionNode(
+            id = "req-trace-1",
+            name = "Trace Request",
+            isFolder = false,
+            method = HttpMethodType.TRACE,
+            url = "https://example.com/trace",
+        )
+        val source = AppState(openDefaultTab = false)
+        source.collections.add(
+            CollectionNode("coll-trace-1", "Trace Collection", isFolder = true,
+                children = mutableStateListOf(request))
+        )
+
+        val exported = ImportExportRepository.exportCollectionToString(source.collections.first())
+
+        val target = AppState(openDefaultTab = false)
+        ImportExportRepository.importCollectionFromString(target, exported)
+
+        val importedRequest = target.collections.first().children.first()
+        assertEquals(HttpMethodType.TRACE, importedRequest.method,
+            "TRACE method must survive collection export/import round-trip")
+    }
+
+    @Test
+    fun `CONNECT request survives collection export and import`() {
+        val request = CollectionNode(
+            id = "req-connect-1",
+            name = "Connect Request",
+            isFolder = false,
+            method = HttpMethodType.CONNECT,
+            url = "https://proxy.example.com:443",
+        )
+        val source = AppState(openDefaultTab = false)
+        source.collections.add(
+            CollectionNode("coll-connect-1", "Connect Collection", isFolder = true,
+                children = mutableStateListOf(request))
+        )
+
+        val exported = ImportExportRepository.exportCollectionToString(source.collections.first())
+
+        val target = AppState(openDefaultTab = false)
+        ImportExportRepository.importCollectionFromString(target, exported)
+
+        val importedRequest = target.collections.first().children.first()
+        assertEquals(HttpMethodType.CONNECT, importedRequest.method,
+            "CONNECT method must survive collection export/import round-trip")
+    }
+
+    @Test
+    fun `TRACE and CONNECT survive workspace export and import`() {
+        val source = AppState(openDefaultTab = false)
+        source.collections.add(
+            CollectionNode("coll-methods", "Methods Collection", isFolder = true,
+                children = mutableStateListOf(
+                    CollectionNode("req-trace-ws", "Trace", isFolder = false,
+                        method = HttpMethodType.TRACE, url = "https://example.com/trace"),
+                    CollectionNode("req-connect-ws", "Connect", isFolder = false,
+                        method = HttpMethodType.CONNECT, url = "https://proxy.example.com:443"),
+                ))
+        )
+
+        val json = ImportExportRepository.exportWorkspaceToString(source)
+        val target = AppState(openDefaultTab = false)
+        ImportExportRepository.importWorkspaceFromString(target, json)
+
+        val importedChildren = target.collections.first { it.name == "Methods Collection" }.children
+        assertEquals(HttpMethodType.TRACE,
+            importedChildren.first { it.name == "Trace" }.method,
+            "TRACE must survive workspace export/import")
+        assertEquals(HttpMethodType.CONNECT,
+            importedChildren.first { it.name == "Connect" }.method,
+            "CONNECT must survive workspace export/import")
+    }
 }

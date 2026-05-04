@@ -37,6 +37,8 @@ data class AppColorPalette(
     val methodDelete: Color,
     val methodOptions: Color,
     val methodHead: Color,
+    val methodTrace: Color,
+    val methodConnect: Color,
 
     val statusSuccess: Color,
     val statusRedirect: Color,
@@ -78,6 +80,8 @@ val DarkAppColors = AppColorPalette(
     methodDelete  = Color(0xFFE06C75),
     methodOptions = Color(0xFF8B8B9E),
     methodHead    = Color(0xFF8B8B9E),
+    methodTrace   = Color(0xFF56B6C2),
+    methodConnect = Color(0xFF56B6C2),
 
     statusSuccess     = Color(0xFF4EC9B0),
     statusRedirect    = Color(0xFFE5C07B),
@@ -124,6 +128,8 @@ val LightAppColors = AppColorPalette(
     methodDelete  = Color(0xFFCF3141),       // lighter red
     methodOptions = Color(0xFF6E7A91),       // cool slate
     methodHead    = Color(0xFF6E7A91),
+    methodTrace   = Color(0xFF2A8FA3),       // teal-cyan
+    methodConnect = Color(0xFF2A8FA3),
 
     // Status
     statusSuccess     = Color(0xFF0FA88E),

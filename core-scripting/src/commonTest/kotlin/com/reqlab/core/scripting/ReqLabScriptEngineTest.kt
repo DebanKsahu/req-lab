@@ -1565,4 +1565,454 @@ class ReqLabScriptEngineTest {
         assertEquals("cVal", r.newCollectionVariables["cAlias"])
         assertTrue(r.assertions.all { it.passed })
     }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // NEW POSTMAN API COVERAGE — response.statusOk / hasHeader / .to chain
+    // ══════════════════════════════════════════════════════════════════════
+
+    @Test
+    fun response_statusOk_passes_for_2xx() = runTest {
+        val r = engine.executeTestScript("""
+            reqlab.test("2xx ok", function() {
+                reqlab.response.statusOk()
+                reqlab.expect(true).to.be.true
+            })
+        """.trimIndent(), ctx(status = 201))
+        assertTrue(r.success)
+        assertTrue(r.assertions[0].passed)
+    }
+
+    @Test
+    fun response_statusOk_throws_for_non_2xx() = runTest {
+        val r = engine.executeTestScript("""
+            reqlab.test("4xx not ok", function() {
+                reqlab.response.statusOk()
+            })
+        """.trimIndent(), ctx(status = 404))
+        assertFalse(r.assertions[0].passed)
+        assertTrue(r.assertions[0].message!!.contains("Expected 2xx"))
+    }
+
+    @Test
+    fun response_hasHeader_passes_when_header_present() = runTest {
+        val r = engine.executeTestScript("""
+            reqlab.test("header present", function() {
+                reqlab.response.hasHeader("Content-Type")
+                reqlab.expect(true).to.be.true
+            })
+        """.trimIndent(), ctx(responseHeaders = mapOf("Content-Type" to "application/json")))
+        assertTrue(r.assertions[0].passed)
+    }
+
+    @Test
+    fun response_hasHeader_throws_when_header_missing() = runTest {
+        val r = engine.executeTestScript("""
+            reqlab.test("header missing", function() {
+                reqlab.response.hasHeader("X-Missing")
+            })
+        """.trimIndent(), ctx(responseHeaders = emptyMap()))
+        assertFalse(r.assertions[0].passed)
+        assertTrue(r.assertions[0].message!!.contains("X-Missing"))
+    }
+
+    @Test
+    fun response_hasHeader_throws_when_value_mismatch() = runTest {
+        val r = engine.executeTestScript("""
+            reqlab.test("header value mismatch", function() {
+                reqlab.response.hasHeader("Content-Type", "text/html")
+            })
+        """.trimIndent(), ctx(responseHeaders = mapOf("Content-Type" to "application/json")))
+        assertFalse(r.assertions[0].passed)
+    }
+
+    @Test
+    fun response_to_have_status_compatibility_chain() = runTest {
+        val r = engine.executeTestScript("""
+            reqlab.test("to.have.status pass", function() {
+                reqlab.response.to.have.status(200)
+                reqlab.expect(true).to.be.true
+            })
+        """.trimIndent(), ctx(status = 200))
+        assertTrue(r.assertions[0].passed)
+    }
+
+    @Test
+    fun response_to_have_status_fails_for_wrong_status() = runTest {
+        val r = engine.executeTestScript("""
+            reqlab.test("to.have.status fail", function() {
+                reqlab.response.to.have.status(404)
+            })
+        """.trimIndent(), ctx(status = 200))
+        assertFalse(r.assertions[0].passed)
+    }
+
+    @Test
+    fun response_to_have_header_compatibility_chain() = runTest {
+        val r = engine.executeTestScript("""
+            reqlab.test("to.have.header pass", function() {
+                reqlab.response.to.have.header("Content-Type")
+            })
+        """.trimIndent(), ctx(responseHeaders = mapOf("Content-Type" to "application/json")))
+        assertTrue(r.assertions[0].passed)
+    }
+
+    @Test
+    fun response_to_be_ok_compatibility_getter() = runTest {
+        val ok = engine.executeTestScript("""
+            reqlab.test("to.be.ok 200", function() {
+                reqlab.response.to.be.ok
+                reqlab.expect(true).to.be.true
+            })
+        """.trimIndent(), ctx(status = 200))
+        assertTrue(ok.assertions[0].passed)
+
+        val notOk = engine.executeTestScript("""
+            reqlab.test("to.be.ok 500", function() {
+                reqlab.response.to.be.ok
+            })
+        """.trimIndent(), ctx(status = 500))
+        assertFalse(notOk.assertions[0].passed)
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // NEW POSTMAN API COVERAGE — variables.has
+    // ══════════════════════════════════════════════════════════════════════
+
+    @Test
+    fun variables_has_returns_true_when_present_in_any_scope() = runTest {
+        val r = engine.executeTestScript("""
+            reqlab.test("has in env scope", function() {
+                reqlab.expect(reqlab.variables.has("envKey")).to.be.true
+            })
+            reqlab.test("has in global scope", function() {
+                reqlab.expect(reqlab.variables.has("gKey")).to.be.true
+            })
+            reqlab.test("not has missing", function() {
+                reqlab.expect(reqlab.variables.has("nope")).to.be.false
+            })
+        """.trimIndent(), ctx(
+            variables = mapOf("envKey" to "v"),
+            globalVariables = mapOf("gKey" to "v"),
+        ))
+        assertTrue(r.success)
+        assertTrue(r.assertions.all { it.passed })
+    }
+
+    @Test
+    fun variables_has_returns_true_for_request_scoped() = runTest {
+        val r = engine.executeTestScript("""
+            reqlab.variables.set("reqKey", "val")
+            reqlab.test("has request-scoped", function() {
+                reqlab.expect(reqlab.variables.has("reqKey")).to.be.true
+            })
+        """.trimIndent(), ctx())
+        assertTrue(r.assertions[0].passed)
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // NEW POSTMAN API COVERAGE — scope.replaceIn
+    // ══════════════════════════════════════════════════════════════════════
+
+    @Test
+    fun environment_replaceIn_substitutes_template_variables() = runTest {
+        val r = engine.executeTestScript("""
+            reqlab.test("replaceIn env", function() {
+                var url = reqlab.environment.replaceIn("{{baseUrl}}/users/{{id}}")
+                reqlab.expect(url).to.equal("https://api.example.com/users/42")
+            })
+        """.trimIndent(), ctx(variables = mapOf("baseUrl" to "https://api.example.com", "id" to "42")))
+        assertTrue(r.assertions[0].passed)
+    }
+
+    @Test
+    fun globals_replaceIn_substitutes_template_variables() = runTest {
+        val r = engine.executeTestScript("""
+            reqlab.test("replaceIn globals", function() {
+                var result = reqlab.globals.replaceIn("token={{token}}")
+                reqlab.expect(result).to.equal("token=abc123")
+            })
+        """.trimIndent(), ctx(globalVariables = mapOf("token" to "abc123")))
+        assertTrue(r.assertions[0].passed)
+    }
+
+    @Test
+    fun replaceIn_leaves_unknown_placeholders_unchanged() = runTest {
+        val r = engine.executeTestScript("""
+            reqlab.test("replaceIn unknown", function() {
+                var result = reqlab.environment.replaceIn("{{known}}/{{unknown}}")
+                reqlab.expect(result).to.equal("val/{{unknown}}")
+            })
+        """.trimIndent(), ctx(variables = mapOf("known" to "val")))
+        assertTrue(r.assertions[0].passed)
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // NEW POSTMAN API COVERAGE — reqlab.info stub
+    // ══════════════════════════════════════════════════════════════════════
+
+    @Test
+    fun info_stub_is_accessible_and_has_expected_fields() = runTest {
+        val r = engine.executeTestScript("""
+            reqlab.test("info exists", function() {
+                reqlab.expect(reqlab.info).to.not.be.undefined
+                reqlab.expect(reqlab.info.requestName).to.not.be.undefined
+                reqlab.expect(reqlab.info.iteration).to.equal(1)
+                reqlab.expect(reqlab.info.iterationCount).to.equal(1)
+                reqlab.expect(reqlab.info.eventName).to.not.be.undefined
+            })
+        """.trimIndent(), ctx())
+        assertTrue(r.success)
+        assertTrue(r.assertions.all { it.passed })
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // NEW POSTMAN API COVERAGE — iterationData and cookies stubs
+    // ══════════════════════════════════════════════════════════════════════
+
+    @Test
+    fun iterationData_stub_does_not_crash() = runTest {
+        val r = engine.executeTestScript("""
+            reqlab.test("iterationData get returns undefined", function() {
+                reqlab.expect(reqlab.iterationData.get("key")).to.be.undefined
+            })
+            reqlab.test("iterationData has returns false", function() {
+                reqlab.expect(reqlab.iterationData.has("key")).to.be.false
+            })
+            reqlab.test("iterationData toObject returns empty", function() {
+                reqlab.expect(Object.keys(reqlab.iterationData.toObject()).length).to.equal(0)
+            })
+        """.trimIndent(), ctx())
+        assertTrue(r.success)
+        assertTrue(r.assertions.all { it.passed })
+    }
+
+    @Test
+    fun cookies_stub_does_not_crash() = runTest {
+        val r = engine.executeTestScript("""
+            reqlab.test("cookies get undefined", function() {
+                reqlab.expect(reqlab.cookies.get("session")).to.be.undefined
+            })
+            reqlab.test("cookies has false", function() {
+                reqlab.expect(reqlab.cookies.has("session")).to.be.false
+            })
+            reqlab.test("cookies jar get undefined", function() {
+                var jar = reqlab.cookies.jar()
+                reqlab.expect(jar.get("any")).to.be.undefined
+            })
+        """.trimIndent(), ctx())
+        assertTrue(r.success)
+        assertTrue(r.assertions.all { it.passed })
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // NEW POSTMAN API COVERAGE — proper globals / collectionVariables scopes
+    // ══════════════════════════════════════════════════════════════════════
+
+    @Test
+    fun globals_set_goes_to_globalVariables_bucket() = runTest {
+        val r = engine.executePreRequestScript("""
+            reqlab.globals.set("newGlobal", "globalVal")
+        """.trimIndent(), ctx())
+        assertTrue(r.success)
+        assertEquals("globalVal", r.newGlobalVariables["newGlobal"])
+        assertFalse(r.newVariables.containsKey("newGlobal"))
+    }
+
+    @Test
+    fun collectionVariables_set_goes_to_collection_bucket() = runTest {
+        val r = engine.executePreRequestScript("""
+            reqlab.collectionVariables.set("newColl", "collVal")
+        """.trimIndent(), ctx())
+        assertTrue(r.success)
+        assertEquals("collVal", r.newCollectionVariables["newColl"])
+        assertFalse(r.newVariables.containsKey("newColl"))
+    }
+
+    @Test
+    fun environment_and_globals_scopes_are_independent() = runTest {
+        val r = engine.executePreRequestScript("""
+            reqlab.environment.set("shared", "fromEnv")
+            reqlab.globals.set("shared", "fromGlobal")
+        """.trimIndent(), ctx())
+        assertTrue(r.success)
+        assertEquals("fromEnv", r.newVariables["shared"])
+        assertEquals("fromGlobal", r.newGlobalVariables["shared"])
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // reqlab.sendRequest() — sub-request from scripts
+    // ══════════════════════════════════════════════════════════════════════
+
+    @Test
+    fun sendRequest_without_executor_does_not_throw_and_returns_success() = runTest {
+        // No executor provided → sub-request is silently ignored
+        val r = engine.executePreRequestScript("""
+            reqlab.sendRequest("https://api.test/token", function(err, resp) {
+                reqlab.environment.set("token", "should-not-be-set")
+            })
+        """.trimIndent(), ctx())
+        assertTrue(r.success, "Expected success, got error: ${r.error}")
+        assertFalse(r.newVariables.containsKey("token"), "Variable should not be set without executor")
+    }
+
+    @Test
+    fun sendRequest_with_mock_executor_runs_callback_and_sets_variable() = runTest {
+        val mockBody = """{"token":"abc123","role":"admin"}"""
+        val mockEngine = ReqLabScriptEngine(
+            sendRequestExecutor = { _ -> SendRequestResult(statusCode = 200, statusText = "OK", body = mockBody) }
+        )
+        val r = mockEngine.executePreRequestScript("""
+            reqlab.sendRequest("https://api.test/token", function(err, resp) {
+                reqlab.environment.set("token", resp.json().token)
+                reqlab.environment.set("role", resp.json().role)
+            })
+        """.trimIndent(), ctx())
+        assertTrue(r.success, "Expected success, got error: ${r.error}")
+        assertEquals("abc123", r.newVariables["token"])
+        assertEquals("admin", r.newVariables["role"])
+    }
+
+    @Test
+    fun sendRequest_callback_assertions_merge_into_result() = runTest {
+        val mockEngine = ReqLabScriptEngine(
+            sendRequestExecutor = { _ -> SendRequestResult(statusCode = 201, statusText = "Created", body = "{}") }
+        )
+        val r = mockEngine.executePreRequestScript("""
+            reqlab.sendRequest("https://api.test/items", function(err, resp) {
+                reqlab.test("sub-request status is 201", function() {
+                    reqlab.expect(resp.code).to.equal(201)
+                })
+            })
+        """.trimIndent(), ctx())
+        assertTrue(r.success, "Expected success")
+        assertEquals(1, r.assertions.size)
+        assertTrue(r.assertions[0].passed, "Assertion should pass")
+        assertEquals("sub-request status is 201", r.assertions[0].name)
+    }
+
+    @Test
+    fun sendRequest_callback_failed_assertion_marks_result_failed() = runTest {
+        val mockEngine = ReqLabScriptEngine(
+            sendRequestExecutor = { _ -> SendRequestResult(statusCode = 500, statusText = "Internal Server Error") }
+        )
+        val r = mockEngine.executePreRequestScript("""
+            reqlab.sendRequest("https://api.test/fail", function(err, resp) {
+                reqlab.test("must be 200", function() {
+                    reqlab.expect(resp.code).to.equal(200)
+                })
+            })
+        """.trimIndent(), ctx())
+        assertFalse(r.success, "Should fail because sub-assertion fails")
+        assertEquals(1, r.assertions.size)
+        assertFalse(r.assertions[0].passed)
+    }
+
+    @Test
+    fun sendRequest_callback_can_access_json_and_text() = runTest {
+        val body = """{"value":42}"""
+        val mockEngine = ReqLabScriptEngine(
+            sendRequestExecutor = { _ -> SendRequestResult(statusCode = 200, body = body) }
+        )
+        val r = mockEngine.executePreRequestScript("""
+            reqlab.sendRequest("https://api.test/val", function(err, resp) {
+                reqlab.test("json parse", function() {
+                    reqlab.expect(resp.json().value).to.equal(42)
+                })
+                reqlab.test("text contains value", function() {
+                    reqlab.expect(resp.text()).to.include("42")
+                })
+            })
+        """.trimIndent(), ctx())
+        assertTrue(r.success, "Expected success")
+        assertTrue(r.assertions.all { it.passed }, "All sub-assertions should pass")
+    }
+
+    @Test
+    fun sendRequest_multiple_requests_processed_in_order() = runTest {
+        var callCount = 0
+        val mockEngine = ReqLabScriptEngine(
+            sendRequestExecutor = { spec ->
+                callCount++
+                when {
+                    spec.url.contains("first") -> SendRequestResult(statusCode = 200, body = """{"n":1}""")
+                    else -> SendRequestResult(statusCode = 200, body = """{"n":2}""")
+                }
+            }
+        )
+        val r = mockEngine.executePreRequestScript("""
+            reqlab.sendRequest("https://api.test/first", function(err, resp) {
+                reqlab.environment.set("first", resp.json().n + "")
+            })
+            reqlab.sendRequest("https://api.test/second", function(err, resp) {
+                reqlab.environment.set("second", resp.json().n + "")
+            })
+        """.trimIndent(), ctx())
+        assertTrue(r.success, "Expected success")
+        assertEquals(2, callCount, "Executor should be called twice")
+        assertEquals("1", r.newVariables["first"])
+        assertEquals("2", r.newVariables["second"])
+    }
+
+    @Test
+    fun sendRequest_executor_error_appended_as_log_not_thrown() = runTest {
+        val mockEngine = ReqLabScriptEngine(
+            sendRequestExecutor = { _ -> throw RuntimeException("Connection refused") }
+        )
+        val r = mockEngine.executePreRequestScript("""
+            reqlab.sendRequest("https://bad-host.invalid/", function(err, resp) {
+                reqlab.environment.set("should-not-set", "yes")
+            })
+        """.trimIndent(), ctx())
+        // sendRequest error should not propagate — it's appended to logs
+        assertTrue(r.logs.any { it.contains("sendRequest error") && it.contains("Connection refused") },
+            "Error should appear in logs. Logs: ${r.logs}")
+        assertFalse(r.newVariables.containsKey("should-not-set"))
+    }
+
+    @Test
+    fun sendRequest_options_object_format_passes_method_and_body() = runTest {
+        var capturedSpec: SendRequestSpec? = null
+        val mockEngine = ReqLabScriptEngine(
+            sendRequestExecutor = { spec ->
+                capturedSpec = spec
+                SendRequestResult(statusCode = 200, body = """{"ok":true}""")
+            }
+        )
+        val r = mockEngine.executePreRequestScript("""
+            reqlab.sendRequest({
+                url: "https://api.test/auth",
+                method: "POST",
+                header: [{ key: "Content-Type", value: "application/json" }],
+                body: { mode: "raw", raw: JSON.stringify({ user: "admin" }) }
+            }, function(err, resp) {
+                reqlab.environment.set("ok", resp.json().ok + "")
+            })
+        """.trimIndent(), ctx())
+        assertTrue(r.success, "Expected success")
+        assertNotNull(capturedSpec)
+        assertEquals("https://api.test/auth", capturedSpec!!.url)
+        assertEquals("POST", capturedSpec!!.method)
+        assertEquals("application/json", capturedSpec!!.headers["Content-Type"])
+        assertTrue(capturedSpec!!.body?.contains("admin") == true, "Body should contain 'admin'")
+        assertEquals("true", r.newVariables["ok"])
+    }
+
+    @Test
+    fun sendRequest_callback_can_read_resp_headers() = runTest {
+        val mockEngine = ReqLabScriptEngine(
+            sendRequestExecutor = { _ -> SendRequestResult(
+                statusCode = 200,
+                body = "{}",
+                headers = mapOf("X-Request-Id" to "req-99"),
+            )}
+        )
+        val r = mockEngine.executePreRequestScript("""
+            reqlab.sendRequest("https://api.test/hdr", function(err, resp) {
+                var rid = resp.headers.get("X-Request-Id")
+                reqlab.environment.set("requestId", rid || "missing")
+            })
+        """.trimIndent(), ctx())
+        assertTrue(r.success, "Expected success")
+        assertEquals("req-99", r.newVariables["requestId"])
+    }
 }

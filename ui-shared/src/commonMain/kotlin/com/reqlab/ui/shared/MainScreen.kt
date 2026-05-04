@@ -134,7 +134,11 @@ fun MainScreen(state: AppState = remember { AppState() }) {
             // Including the full body (potentially multi-MB) would create a huge
             // string on the main thread on every keystroke and block the UI.
             val bodyLen = t?.bodyContent?.length ?: 0
-            "${state.openTabs.size}|${state.activeTabIndex}|${t?.name}|${t?.url}|${t?.method}|${t?.bodyType}|BL:$bodyLen|$params|$headers|$auth|${t?.preRequestScript}|${t?.testScript}"
+            // Include form row counts so adding/removing form-data or urlencoded
+            // rows triggers auto-save even if bodyContent length is unchanged.
+            val formCount = t?.formRows?.size ?: 0
+            val urlEncCount = t?.urlencodedRows?.size ?: 0
+            "${state.openTabs.size}|${state.activeTabIndex}|${t?.name}|${t?.url}|${t?.method}|${t?.bodyType}|BL:$bodyLen|FR:$formCount|UE:$urlEncCount|$params|$headers|$auth|${t?.preRequestScript}|${t?.testScript}"
         }.drop(1)
             .collect {
                 if (state.settings.autoSaveRequests) {

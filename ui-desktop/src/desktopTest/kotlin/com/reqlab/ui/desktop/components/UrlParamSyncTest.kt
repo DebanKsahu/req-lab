@@ -158,4 +158,35 @@ class UrlParamSyncTest {
         assertTrue(tab.url.contains("page=1"))
         assertTrue(tab.url.contains("limit=20"))
     }
+
+    // ─────────────────────────────────────────────────────────────
+    // Regression: params duplication in execution (Bug #1)
+    // buildUrlWithParams appends tab.params to a URL that already
+    // contains those same params (put there by syncUrlFromParams).
+    // ─────────────────────────────────────────────────────────────
+
+    @Test
+    fun `buildCurlCommand – params are not duplicated when url already has embedded query string`() {
+        // After syncUrlFromParams, tab.url contains "?q=test&page=1".
+        // buildUrlWithParams (called inside buildCurlCommand) also appends tab.params
+        // → each param ends up doubled in the final URL.
+        val tab = RequestTabState().apply { url = "http://localhost:8080/api/search" }
+        syncParamsFromUrl(tab, "http://localhost:8080/api/search?q=test&page=1")
+        syncUrlFromParams(tab)
+        // tab.url is now "http://localhost:8080/api/search?q=test&page=1"
+        // tab.params still holds [q=test, page=1]
+
+        val curlCmd = buildCurlCommand(tab)
+
+        assertEquals(
+            1,
+            curlCmd.split("q=test").size - 1,
+            "q=test must appear exactly once in the curl command URL; duplication detected:\n$curlCmd",
+        )
+        assertEquals(
+            1,
+            curlCmd.split("page=1").size - 1,
+            "page=1 must appear exactly once in the curl command URL; duplication detected:\n$curlCmd",
+        )
+    }
 }

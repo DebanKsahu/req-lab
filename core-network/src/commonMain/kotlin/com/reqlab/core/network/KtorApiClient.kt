@@ -339,6 +339,8 @@ private fun HttpMethodType.toKtorMethod(): HttpMethod = when (this) {
     HttpMethodType.DELETE -> HttpMethod.Delete
     HttpMethodType.OPTIONS -> HttpMethod.Options
     HttpMethodType.HEAD -> HttpMethod.Head
+    HttpMethodType.TRACE -> HttpMethod("TRACE")
+    HttpMethodType.CONNECT -> HttpMethod("CONNECT")
 }
 
 private suspend fun HttpResponse.toResponseDefinition(
