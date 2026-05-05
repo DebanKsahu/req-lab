@@ -3,6 +3,7 @@ package com.reqlab.editor.ui
 import com.reqlab.editor.core.DisplayLineMap
 import com.reqlab.editor.core.DocumentModel
 import com.reqlab.editor.core.FoldRegion
+import com.reqlab.editor.core.FoldingStyle
 import com.reqlab.editor.core.InlineEditorError
 import com.reqlab.editor.core.LanguageMode
 import com.reqlab.editor.core.LanguageRegistry
@@ -95,9 +96,16 @@ class EditorViewModel(
     private val redoStack = ArrayDeque<EditCommand>()
     private var undoBytes: Long = 0L
 
+    @kotlin.concurrent.Volatile
+    var foldRegions: List<FoldRegion> = emptyList()
+        private set
+
     init {
         idleLexer.scheduleFrom(0, scope)
-        scheduleInitialFolds()
+        // Run initial fold detection synchronously to avoid startup race/flakiness
+        // in tests and release CI. This is lightweight for initial payload sizes.
+        computeAndApplyFolds()
+        emitFoldUpdate(computeHasLineTruncation())
     }
 
     fun onExternalTextChanged(text: String) {
@@ -651,28 +659,32 @@ class EditorViewModel(
         idleLexer.scheduleFrom(firstCharInViewport, scope)
     }
 
-    @kotlin.concurrent.Volatile
-    var foldRegions: List<FoldRegion> = emptyList()
-        private set
-
-    private fun scheduleInitialFolds() {
-        scope.launch(Dispatchers.Default) {
-            computeAndApplyFolds()
-            val hasTruncation = computeHasLineTruncation()
-            // StateFlow.update is @ThreadSafe — no Main dispatcher needed
-            emitFoldUpdate(hasTruncation)
-        }
-    }
-
     private suspend fun scheduleInitialFoldsInternal() {
         computeAndApplyFolds()
     }
 
     private fun computeAndApplyFolds() {
-        val editorDoc = com.reqlab.editor.core.EditorDocument.create(document.toFullString())
-        val regions = provider.foldingRegions(editorDoc)
+        val regions = detectFoldRegionsForText(document.toFullString())
         foldRegions = regions
         displayLineMap.reset(document.lineCount)
+    }
+
+    private fun detectFoldRegionsForText(text: String): List<FoldRegion> {
+        val editorDoc = com.reqlab.editor.core.EditorDocument.create(text)
+        val providerRegions = provider.foldingRegions(editorDoc)
+        if (providerRegions.isNotEmpty()) return providerRegions
+
+        val lines = text.split('\n')
+        val fallbackRegions = when (provider.foldingStyle) {
+            FoldingStyle.BRACE -> detectBraceFoldRegions(lines) + detectCommentFoldRegions(lines)
+            FoldingStyle.XML -> detectXmlFoldRegions(lines) + detectCommentFoldRegions(lines)
+            FoldingStyle.PLAIN -> emptyList()
+        }
+        return fallbackRegions
+            .map { FoldRegion(startLine = it.startLine + 1, endLine = it.endLine + 1) }
+            .filter { it.endLine > it.startLine }
+            .distinctBy { it.startLine to it.endLine }
+            .sortedBy { it.startLine }
     }
 
     private fun emitFoldUpdate(hasTruncation: Boolean = false) {
@@ -749,8 +761,7 @@ class EditorViewModel(
             if (editSequence != seq) return@launch
             val text = lastExternalText
             if (editSequence != seq) return@launch
-            val editorDoc = com.reqlab.editor.core.EditorDocument.create(text)
-            val newRegions = provider.foldingRegions(editorDoc)
+            val newRegions = detectFoldRegionsForText(text)
             if (editSequence == seq) {
                 foldRegions = newRegions
                 _state.update { it.copy(foldVersion = it.foldVersion + 1) }
