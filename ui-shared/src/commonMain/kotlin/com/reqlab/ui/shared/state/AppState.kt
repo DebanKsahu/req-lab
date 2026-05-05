@@ -1215,8 +1215,9 @@ class AppState(openDefaultTab: Boolean = true, withDemoData: Boolean = false) {
     fun syncSidebarToActiveTab() {
         val tab = activeTab ?: return
         val resolvedRequestId = resolveSidebarRequestId(tab.id)
+        val wasAlreadySelected = selectedRequestId == resolvedRequestId
         selectedRequestId = resolvedRequestId
-        if (expandAncestorsForRequest(collections, resolvedRequestId)) {
+        if (!wasAlreadySelected && expandAncestorsForRequest(collections, resolvedRequestId)) {
             // Reset signal first so repeated targets still trigger row scrolling.
             sidebarScrollToRequestId = null
             sidebarScrollToRequestId = resolvedRequestId

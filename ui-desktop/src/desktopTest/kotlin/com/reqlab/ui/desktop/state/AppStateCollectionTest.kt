@@ -556,6 +556,20 @@ class AppStateCollectionTest {
         assertEquals("r4", state.selectedRequestId)
     }
 
+    @Test
+    fun syncSidebarToActiveTab_does_not_scroll_when_request_already_selected() {
+        val state = AppState(withDemoData = true)
+        // Simulate sidebar click path: request already selected before active-tab sync runs.
+        state.openRequest(requestId = "r1", name = "Get all users", method = HttpMethodType.GET, url = "{{baseUrl}}/users")
+        state.selectedRequestId = "r1"
+        state.sidebarScrollToRequestId = null
+
+        state.syncSidebarToActiveTab()
+
+        assertEquals("r1", state.selectedRequestId)
+        assertNull(state.sidebarScrollToRequestId, "Sidebar click selection should not trigger auto-scroll nudge")
+    }
+
     // ── Workspace restoration: restored tab IDs match collection IDs ──
 
     @Test
