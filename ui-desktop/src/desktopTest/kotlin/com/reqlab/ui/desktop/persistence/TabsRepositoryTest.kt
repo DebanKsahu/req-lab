@@ -6,9 +6,11 @@ import com.reqlab.core.model.FormEntryType
 import com.reqlab.core.model.HttpMethodType
 import com.reqlab.ui.shared.platform.PlatformStorage
 import com.reqlab.ui.shared.state.AppState
+import com.reqlab.ui.shared.state.CollectionNode
 import com.reqlab.ui.shared.state.HeaderKind
 import com.reqlab.ui.shared.state.MutableFormDataRow
 import com.reqlab.ui.shared.state.MutableKeyValue
+import com.reqlab.ui.shared.state.RequestTabState
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
@@ -230,5 +232,95 @@ class TabsRepositoryTest {
         assertFalse(loaded.isDirty,
             "A clean url-encoded tab must not be dirty after save/load")
         assertEquals(1, loaded.urlencodedRows.size, "urlencodedRows must round-trip through persistence")
+    }
+
+    @Test
+    fun load_restores_tabs_with_same_request_name_in_different_collections_using_collection_id() {
+        val source = AppState(openDefaultTab = false, withDemoData = false)
+
+        val sourceReqA = CollectionNode(id = "r-a", name = "Health", isFolder = false, method = HttpMethodType.GET, url = "https://a.example.com/health")
+        val sourceReqB = CollectionNode(id = "r-b", name = "Health", isFolder = false, method = HttpMethodType.GET, url = "https://b.example.com/health")
+        source.collections.add(
+            CollectionNode(id = "c-a", name = "API A", isFolder = true, children = mutableListOf(sourceReqA))
+        )
+        source.collections.add(
+            CollectionNode(id = "c-b", name = "API B", isFolder = true, children = mutableListOf(sourceReqB))
+        )
+
+        source.openTabs.clear()
+        source.openTabs.add(
+            RequestTabState(
+                id = sourceReqA.id,
+                name = sourceReqA.name,
+                method = sourceReqA.method ?: HttpMethodType.GET,
+                url = sourceReqA.url ?: "",
+                collectionName = "API A",
+                collectionId = "c-a",
+            )
+        )
+        source.openTabs.add(
+            RequestTabState(
+                id = sourceReqB.id,
+                name = sourceReqB.name,
+                method = sourceReqB.method ?: HttpMethodType.GET,
+                url = sourceReqB.url ?: "",
+                collectionName = "API B",
+                collectionId = "c-b",
+            )
+        )
+        source.activeTabIndex = 1
+        assertTrue(TabsRepository.save(source), "tab save should succeed")
+
+        val restored = AppState(openDefaultTab = false, withDemoData = false)
+        val restoredReqA = CollectionNode(id = "r-a-new", name = "Health", isFolder = false, method = HttpMethodType.GET, url = "https://a.example.com/health")
+        val restoredReqB = CollectionNode(id = "r-b-new", name = "Health", isFolder = false, method = HttpMethodType.GET, url = "https://b.example.com/health")
+        restored.collections.add(
+            CollectionNode(id = "c-a", name = "API A", isFolder = true, children = mutableListOf(restoredReqA))
+        )
+        restored.collections.add(
+            CollectionNode(id = "c-b", name = "API B", isFolder = true, children = mutableListOf(restoredReqB))
+        )
+
+        TabsRepository.load(restored)
+
+        assertEquals(2, restored.openTabs.size)
+        assertEquals("r-a-new", restored.openTabs[0].id, "API A tab must resolve to API A request")
+        assertEquals("r-b-new", restored.openTabs[1].id, "API B tab must resolve to API B request")
+        assertEquals("c-a", restored.openTabs[0].collectionId)
+        assertEquals("c-b", restored.openTabs[1].collectionId)
+    }
+
+    @Test
+    fun load_restores_tabs_with_duplicate_collection_names_without_collection_id_using_signature() {
+        val source = AppState(openDefaultTab = false, withDemoData = false)
+        val reqA = CollectionNode(id = "r-a", name = "Users", isFolder = false, method = HttpMethodType.GET, url = "https://a.example.com/users")
+        val reqB = CollectionNode(id = "r-b", name = "Users", isFolder = false, method = HttpMethodType.GET, url = "https://b.example.com/users")
+        source.collections.add(CollectionNode(id = "c-a", name = "API", isFolder = true, children = mutableListOf(reqA)))
+        source.collections.add(CollectionNode(id = "c-b", name = "API", isFolder = true, children = mutableListOf(reqB)))
+
+        source.openTabs.clear()
+        source.openTabs.add(
+            RequestTabState(
+                id = reqB.id,
+                name = reqB.name,
+                method = reqB.method ?: HttpMethodType.GET,
+                url = reqB.url ?: "",
+                collectionName = "API",
+                collectionId = null,
+            )
+        )
+        assertTrue(TabsRepository.save(source), "tab save should succeed")
+
+        val restored = AppState(openDefaultTab = false, withDemoData = false)
+        val restoredReqA = CollectionNode(id = "r-a-new", name = "Users", isFolder = false, method = HttpMethodType.GET, url = "https://a.example.com/users")
+        val restoredReqB = CollectionNode(id = "r-b-new", name = "Users", isFolder = false, method = HttpMethodType.GET, url = "https://b.example.com/users")
+        restored.collections.add(CollectionNode(id = "c-a", name = "API", isFolder = true, children = mutableListOf(restoredReqA)))
+        restored.collections.add(CollectionNode(id = "c-b", name = "API", isFolder = true, children = mutableListOf(restoredReqB)))
+
+        TabsRepository.load(restored)
+
+        assertEquals(1, restored.openTabs.size)
+        assertEquals("r-b-new", restored.openTabs[0].id)
+        assertEquals("c-b", restored.openTabs[0].collectionId)
     }
 }

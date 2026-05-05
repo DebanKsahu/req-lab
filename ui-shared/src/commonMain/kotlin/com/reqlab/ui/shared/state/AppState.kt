@@ -92,6 +92,7 @@ data class CollectionNode(
     val authToken: String? = null,
     val authApiKey: String? = null,
     val authApiValue: String? = null,
+    val requestRef: String? = null,
 )
 
 /**
@@ -222,11 +223,14 @@ class RequestTabState(
     method: HttpMethodType = HttpMethodType.GET,
     url: String = "",
     collectionName: String? = null,
-    val folderPath: List<String> = emptyList(),
+    collectionId: String? = null,
+    folderPath: List<String> = emptyList(),
+    requestRef: String? = null,
 ) {
     val requestId: String get() = id
 
     var name     by mutableStateOf(name)
+    var requestRef by mutableStateOf(requestRef)
     var method   by mutableStateOf(method)
     var url      by mutableStateOf(url)
     var isDirty  by mutableStateOf(false)
@@ -234,6 +238,8 @@ class RequestTabState(
     private var savedSnapshot by mutableStateOf("")
 
     var collectionName by mutableStateOf(collectionName)
+    var collectionId by mutableStateOf(collectionId)
+    var folderPath by mutableStateOf(folderPath)
 
     var selectedEditorTab by mutableStateOf(RequestEditorTab.PARAMS)
 
@@ -652,11 +658,13 @@ class AppState(openDefaultTab: Boolean = true, withDemoData: Boolean = false) {
     }
 
     init {
+        ensureRequestRefsInitialized()
         syncHistoryWithCollections()
     }
 
     private data class RequestReference(
         val requestId: String,
+        val requestRef: String,
         val collectionId: String?,
         val folderPath: List<String>,
         val name: String,
@@ -678,18 +686,29 @@ class AppState(openDefaultTab: Boolean = true, withDemoData: Boolean = false) {
             return
         }
         var cName: String? = null
+        var cId: String? = null
         val fPath = mutableListOf<String>()
         var found = false
         for (c in collections) {
             if (findPathRecursive(c, requestId, fPath)) {
                 cName = c.name
+                cId = c.id
                 found = true
                 break
             }
         }
         val pathWithoutNode = if (found && fPath.isNotEmpty()) fPath.dropLast(1) else emptyList()
         val node = findNodeById(collections, requestId)
-        val tab = RequestTabState(id = requestId, name = name, method = method, url = url, collectionName = cName, folderPath = pathWithoutNode)
+        val tab = RequestTabState(
+            id = requestId,
+            requestRef = node?.requestRef ?: node?.id,
+            name = name,
+            method = method,
+            url = url,
+            collectionName = cName,
+            collectionId = cId,
+            folderPath = pathWithoutNode,
+        )
         // Populate params from the URL query string so the Params tab shows them
         // immediately on first open. CollectionNode has no params field so this is
         // the only opportunity to seed them before the user opens the Params tab.
@@ -769,22 +788,91 @@ class AppState(openDefaultTab: Boolean = true, withDemoData: Boolean = false) {
         return null
     }
 
-    private fun resolveSidebarRequestId(requestId: String): String {
-        if (findNodeById(collections, requestId) != null) return requestId
+    private fun findRequestBySignatureInSubtree(node: CollectionNode, tab: RequestTabState): CollectionNode? {
+        node.children.forEach { child ->
+            if (!child.isFolder && child.name == tab.name && child.method == tab.method && child.url == tab.url) {
+                return child
+            }
+            if (child.isFolder) {
+                findRequestBySignatureInSubtree(child, tab)?.let { return it }
+            }
+        }
+        return null
+    }
 
-        val tab = openTabs.firstOrNull { it.id == requestId } ?: return requestId
+    private fun findRequestByNameInSubtree(node: CollectionNode, tab: RequestTabState): CollectionNode? {
+        node.children.forEach { child ->
+            if (!child.isFolder && child.name == tab.name) return child
+            if (child.isFolder) {
+                findRequestByNameInSubtree(child, tab)?.let { return it }
+            }
+        }
+        return null
+    }
+
+    private fun resolveFolderPathScope(root: CollectionNode, folderPath: List<String>): CollectionNode {
+        var cursor = root
+        for (folderName in folderPath) {
+            val next = cursor.children.firstOrNull { it.isFolder && it.name == folderName } ?: break
+            cursor = next
+        }
+        return cursor
+    }
+
+    private fun resolveSidebarRequestId(requestId: String): String {
+        val tab = openTabs.firstOrNull { it.id == requestId }
+        if (tab == null) {
+            if (findNodeById(collections, requestId) != null) return requestId
+            return requestId
+        }
+
+        val references = buildRequestReferenceMap()
+        val byRequestRef = tab.requestRef?.let { ref ->
+            references.values.firstOrNull { it.requestRef == ref }
+        }
+        if (byRequestRef != null) return byRequestRef.requestId
+
+        if (references.containsKey(requestId) && tabMatchesRequestScope(tab, requestId, references)) {
+            return requestId
+        }
+
+        val collectionId = tab.collectionId
+        if (collectionId != null) {
+            val root = collections.firstOrNull { it.isFolder && it.id == collectionId }
+            if (root != null) {
+                val scope = resolveFolderPathScope(root, tab.folderPath)
+                val candidate = findRequestBySignatureInSubtree(scope, tab)
+                    ?: findRequestByNameInSubtree(scope, tab)
+                    ?: findRequestBySignatureInSubtree(root, tab)
+                    ?: findRequestByNameInSubtree(root, tab)
+                if (candidate != null) return candidate.id
+            }
+        }
 
         val collectionName = tab.collectionName
         if (collectionName != null) {
-            val root = collections.firstOrNull { it.isFolder && it.name == collectionName }
-            if (root != null) {
-                var cursor: CollectionNode = root
-                tab.folderPath.forEach { folderName ->
-                    val next = cursor.children.firstOrNull { it.isFolder && it.name == folderName }
-                    if (next != null) cursor = next
-                }
-                val byName = cursor.children.firstOrNull { !it.isFolder && it.name == tab.name }
-                if (byName != null) return byName.id
+            val roots = collections.filter { it.isFolder && it.name == collectionName }
+            val candidateFolders = mutableListOf<CollectionNode>()
+            roots.forEach { root ->
+                candidateFolders.add(resolveFolderPathScope(root, tab.folderPath))
+            }
+
+            candidateFolders.forEach { folder ->
+                val candidate = findRequestBySignatureInSubtree(folder, tab)
+                if (candidate != null) return candidate.id
+            }
+            candidateFolders.forEach { folder ->
+                val candidate = findRequestByNameInSubtree(folder, tab)
+                if (candidate != null) return candidate.id
+            }
+
+            roots.forEach { root ->
+                val candidate = findRequestBySignatureInSubtree(root, tab)
+                if (candidate != null) return candidate.id
+            }
+            roots.forEach { root ->
+                val candidate = findRequestByNameInSubtree(root, tab)
+                if (candidate != null) return candidate.id
             }
         }
 
@@ -794,8 +882,50 @@ class AppState(openDefaultTab: Boolean = true, withDemoData: Boolean = false) {
             method = tab.method,
             url = tab.url,
         )
+        if (bySignature != null) return bySignature.id
 
-        return bySignature?.id ?: requestId
+        if (references.containsKey(requestId)) return requestId
+
+        return requestId
+    }
+
+    private fun tabMatchesRequestScope(
+        tab: RequestTabState,
+        requestId: String,
+        references: Map<String, RequestReference>,
+    ): Boolean {
+        val reference = references[requestId] ?: return false
+        tab.requestRef?.let { if (reference.requestRef != it) return false }
+
+        // Collection ID is the most reliable discriminator: use it exclusively when available.
+        // We intentionally do NOT also check collectionName here — names can be stale after
+        // a collection rename between sessions while the ID stays correct.
+        val tabCollectionId = tab.collectionId
+        if (tabCollectionId != null) {
+            return tabCollectionId == reference.collectionId
+        }
+
+        // No collection ID available — fall back to name + URL to prevent a stale tab id from
+        // matching a same-named request that has a different URL (classic restored-tab problem).
+        val tabCollectionName = tab.collectionName
+        if (tabCollectionName != null) {
+            val referenceCollectionName = reference.collectionId?.let { id ->
+                collections.firstOrNull { it.isFolder && it.id == id }?.name
+            }
+            if (referenceCollectionName != null && referenceCollectionName != tabCollectionName) return false
+        }
+        if (tab.folderPath.isNotEmpty() && !pathStartsWith(reference.folderPath, tab.folderPath)) return false
+        // URL match: guard against stale ids in same-named collections.
+        if (reference.url.isNotEmpty() && reference.url != tab.url) return false
+        return true
+    }
+
+    private fun pathStartsWith(path: List<String>, prefix: List<String>): Boolean {
+        if (prefix.size > path.size) return false
+        prefix.indices.forEach { index ->
+            if (path[index] != prefix[index]) return false
+        }
+        return true
     }
 
     fun closeTab(index: Int) {
@@ -863,6 +993,8 @@ class AppState(openDefaultTab: Boolean = true, withDemoData: Boolean = false) {
         // Bump revision for the autosave snapshotFlow.
         // Children lists are now SnapshotStateList (mutableStateListOf), so Compose
         // automatically observes add/remove on them — no .copy() trick needed.
+        ensureRequestRefsInitialized()
+        syncOpenTabsWithCollections()
         syncHistoryWithCollections()
         collectionsRevision++
     }
@@ -891,6 +1023,7 @@ class AppState(openDefaultTab: Boolean = true, withDemoData: Boolean = false) {
         val requestId = generateUuid()
         val node = CollectionNode(
             id = requestId,
+            requestRef = generateUuid(),
             name = name,
             isFolder = false,
             method = HttpMethodType.GET,
@@ -967,6 +1100,9 @@ class AppState(openDefaultTab: Boolean = true, withDemoData: Boolean = false) {
         if (tabIdx >= 0) activeTabIndex = tabIdx
 
         if (expandAncestorsForRequest(collections, resolvedRequestId)) {
+            // Clear first, then set, so duplicate-name tab switches can retrigger
+            // scroll even when the same request id is emitted consecutively.
+            sidebarScrollToRequestId = null
             sidebarScrollToRequestId = resolvedRequestId
         }
         return true
@@ -1081,6 +1217,8 @@ class AppState(openDefaultTab: Boolean = true, withDemoData: Boolean = false) {
         val resolvedRequestId = resolveSidebarRequestId(tab.id)
         selectedRequestId = resolvedRequestId
         if (expandAncestorsForRequest(collections, resolvedRequestId)) {
+            // Reset signal first so repeated targets still trigger row scrolling.
+            sidebarScrollToRequestId = null
             sidebarScrollToRequestId = resolvedRequestId
         }
     }
@@ -1114,8 +1252,10 @@ class AppState(openDefaultTab: Boolean = true, withDemoData: Boolean = false) {
             } else {
                 val method = node.method ?: continue
                 val url = node.url ?: continue
+                val requestRef = node.requestRef ?: node.id
                 target[node.id] = RequestReference(
                     requestId = node.id,
+                    requestRef = requestRef,
                     collectionId = currentCollectionId,
                     folderPath = currentFolderPath,
                     name = node.name,
@@ -1148,6 +1288,38 @@ class AppState(openDefaultTab: Boolean = true, withDemoData: Boolean = false) {
             historyItems.clear()
             historyItems.addAll(synced)
             historyRevision++
+        }
+    }
+
+    private fun syncOpenTabsWithCollections() {
+        val references = buildRequestReferenceMap()
+        val rootNamesById = collections
+            .filter { it.isFolder }
+            .associate { it.id to it.name }
+
+        openTabs.forEach { tab ->
+            val reference = tab.requestRef?.let { ref ->
+                references.values.firstOrNull { it.requestRef == ref }
+            } ?: references[tab.id] ?: return@forEach
+            tab.requestRef = reference.requestRef
+            tab.collectionId = reference.collectionId
+            tab.collectionName = reference.collectionId?.let { rootNamesById[it] }
+            tab.folderPath = reference.folderPath
+        }
+    }
+
+    private fun ensureRequestRefsInitialized() {
+        ensureRequestRefsInitializedRecursive(collections)
+    }
+
+    private fun ensureRequestRefsInitializedRecursive(nodes: MutableList<CollectionNode>) {
+        nodes.indices.forEach { index ->
+            val node = nodes[index]
+            if (node.isFolder) {
+                if (node.children.isNotEmpty()) ensureRequestRefsInitializedRecursive(node.children)
+            } else if (node.requestRef == null) {
+                nodes[index] = node.copy(requestRef = generateUuid())
+            }
         }
     }
 
@@ -1197,6 +1369,7 @@ class AppState(openDefaultTab: Boolean = true, withDemoData: Boolean = false) {
                     FormDataEntryState(r.key, r.type, r.value, r.description, r.enabled)
                 }
                 nodes[index] = node.copy(
+                    requestRef = node.requestRef ?: tab.requestRef ?: generateUuid(),
                     name   = tab.name,
                     method = tab.method,
                     url    = tab.url,

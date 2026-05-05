@@ -4,8 +4,11 @@ import com.reqlab.ui.shared.MainScreen
 
 import com.reqlab.ui.shared.components.deleteRequestFromCollections
 import com.reqlab.ui.shared.components.duplicateRequestInCollections
+import com.reqlab.ui.shared.components.moveFolderAfterFolder
+import com.reqlab.ui.shared.components.moveFolderBeforeFolder
 import com.reqlab.ui.shared.components.moveRequestAfterRequest
 import com.reqlab.ui.shared.components.moveRequestBeforeRequest
+import com.reqlab.ui.shared.components.isValidFolderDropTarget
 import com.reqlab.ui.shared.persistence.TabsRepository
 import com.reqlab.ui.shared.state.AppState
 import org.junit.Test
@@ -66,6 +69,120 @@ class RequestFlowsIntegrationTest {
         assertEquals("r2", usersCollection.children[0].id)
         assertEquals("r1", usersCollection.children[1].id)
         assertEquals("r3", usersCollection.children[2].id)
+    }
+
+    @Test
+    fun drag_reorder_subfolder_before_updates_parent_folder_order() {
+        val state = AppState(openDefaultTab = false, withDemoData = false)
+        val folderA = com.reqlab.ui.shared.state.CollectionNode("fa", "Folder A", isFolder = true)
+        val folderB = com.reqlab.ui.shared.state.CollectionNode("fb", "Folder B", isFolder = true)
+        val root = com.reqlab.ui.shared.state.CollectionNode(
+            "root",
+            "Root",
+            isFolder = true,
+            children = androidx.compose.runtime.mutableStateListOf(folderA, folderB),
+        )
+        state.collections.add(root)
+
+        val moved = moveFolderBeforeFolder(state.collections, "fb", "fa")
+
+        assertTrue(moved)
+        assertEquals("fb", root.children[0].id)
+        assertEquals("fa", root.children[1].id)
+    }
+
+    @Test
+    fun drag_reorder_subfolder_after_updates_parent_folder_order() {
+        val state = AppState(openDefaultTab = false, withDemoData = false)
+        val folderA = com.reqlab.ui.shared.state.CollectionNode("fa", "Folder A", isFolder = true)
+        val folderB = com.reqlab.ui.shared.state.CollectionNode("fb", "Folder B", isFolder = true)
+        val root = com.reqlab.ui.shared.state.CollectionNode(
+            "root",
+            "Root",
+            isFolder = true,
+            children = androidx.compose.runtime.mutableStateListOf(folderA, folderB),
+        )
+        state.collections.add(root)
+
+        val moved = moveFolderAfterFolder(state.collections, "fa", "fb")
+
+        assertTrue(moved)
+        assertEquals("fb", root.children[0].id)
+        assertEquals("fa", root.children[1].id)
+    }
+
+    @Test
+    fun drag_reorder_nested_subfolder_before_updates_nested_parent_order() {
+        val state = AppState(openDefaultTab = false, withDemoData = false)
+        val childA = com.reqlab.ui.shared.state.CollectionNode("cfa", "Child A", isFolder = true)
+        val childB = com.reqlab.ui.shared.state.CollectionNode("cfb", "Child B", isFolder = true)
+        val parent = com.reqlab.ui.shared.state.CollectionNode(
+            "pf",
+            "Parent",
+            isFolder = true,
+            children = androidx.compose.runtime.mutableStateListOf(childA, childB),
+        )
+        val root = com.reqlab.ui.shared.state.CollectionNode(
+            "root",
+            "Root",
+            isFolder = true,
+            children = androidx.compose.runtime.mutableStateListOf(parent),
+        )
+        state.collections.add(root)
+
+        val moved = moveFolderBeforeFolder(state.collections, "cfb", "cfa")
+
+        assertTrue(moved)
+        assertEquals("cfb", parent.children[0].id)
+        assertEquals("cfa", parent.children[1].id)
+    }
+
+    @Test
+    fun drag_reorder_folder_prevents_drop_into_own_descendant() {
+        val state = AppState(openDefaultTab = false, withDemoData = false)
+        val child = com.reqlab.ui.shared.state.CollectionNode("child", "Child", isFolder = true)
+        val parent = com.reqlab.ui.shared.state.CollectionNode(
+            "parent",
+            "Parent",
+            isFolder = true,
+            children = androidx.compose.runtime.mutableStateListOf(child),
+        )
+        state.collections.add(parent)
+
+        val moved = moveFolderBeforeFolder(state.collections, "parent", "child")
+
+        assertFalse(moved, "Folder should not be movable into its own descendant")
+        assertEquals("parent", state.collections[0].id)
+        assertEquals("child", state.collections[0].children[0].id)
+    }
+
+    @Test
+    fun folder_drop_target_validation_rejects_descendant_target() {
+        val state = AppState(openDefaultTab = false, withDemoData = false)
+        val child = com.reqlab.ui.shared.state.CollectionNode("child", "Child", isFolder = true)
+        val parent = com.reqlab.ui.shared.state.CollectionNode(
+            "parent",
+            "Parent",
+            isFolder = true,
+            children = androidx.compose.runtime.mutableStateListOf(child),
+        )
+        state.collections.add(parent)
+
+        val valid = isValidFolderDropTarget(state.collections, "parent", "child")
+
+        assertFalse(valid)
+    }
+
+    @Test
+    fun folder_drop_target_validation_accepts_sibling_target() {
+        val state = AppState(openDefaultTab = false, withDemoData = false)
+        val a = com.reqlab.ui.shared.state.CollectionNode("a", "A", isFolder = true)
+        val b = com.reqlab.ui.shared.state.CollectionNode("b", "B", isFolder = true)
+        state.collections.addAll(listOf(a, b))
+
+        val valid = isValidFolderDropTarget(state.collections, "a", "b")
+
+        assertTrue(valid)
     }
 
     @Test

@@ -128,6 +128,23 @@ private data class TreeNodeHitArea(
     val label: String,
 )
 
+private fun resolveClosestHitArea(
+    areas: Collection<TreeNodeHitArea>,
+    cursorY: Float,
+): TreeNodeHitArea? {
+    // Prefer rows that currently contain the cursor. If none contain it,
+    // fall back to nearest row center to keep drag interactions continuous.
+    val inside = areas.filter { cursorY >= it.top && cursorY <= it.bottom }
+    if (inside.isNotEmpty()) {
+        return inside.minByOrNull {
+            kotlin.math.abs(cursorY - ((it.top + it.bottom) / 2f))
+        }
+    }
+    return areas.minByOrNull {
+        kotlin.math.abs(cursorY - ((it.top + it.bottom) / 2f))
+    }
+}
+
 private fun normalizeSidebarSearchQuery(raw: String): String {
     // Strip invisible formatting characters so visually empty input cannot
     // keep a stale filter active (e.g., zero-width spaces from paste/IME).
@@ -163,8 +180,12 @@ fun Sidebar(state: AppState) {
     var dragCollectionOffsetY by remember { mutableStateOf(0f) }
     var dropCollectionTargetId by remember { mutableStateOf<String?>(null) }
     var dropCollectionInsertAfter by remember { mutableStateOf(false) }
-    // Hit areas for top-level collection root rows
+    // Hit areas for ALL folder nodes (roots + subfolders). parentCollectionId on each
+    // entry records the direct parent so we can filter to same-level siblings only.
     val collectionHitAreas = remember { HashMap<String, TreeNodeHitArea>() }
+    // parentCollectionId of the folder currently being dragged (null = root level).
+    var draggedFolderParentId by remember { mutableStateOf<String?>(null) }
+    var draggedFolderParentIdSet by remember { mutableStateOf(false) }
 
     // ── Sidebar LazyColumn state + bounds for edge-scroll ─────────────────
     val lazyListState = rememberLazyListState()
@@ -201,9 +222,10 @@ fun Sidebar(state: AppState) {
                     hitAreas.keys.toList().forEach { id ->
                         hitAreas[id]?.let { hitAreas[id] = it.copy(top = it.top + shift, bottom = it.bottom + shift) }
                     }
-                    val target = hitAreas.values
-                        .filter { it.id != activeRequestId }
-                        .minByOrNull { kotlin.math.abs(((it.top + it.bottom) / 2f) - cursorY) }
+                    val target = resolveClosestHitArea(
+                        areas = hitAreas.values.filter { it.id != activeRequestId },
+                        cursorY = cursorY,
+                    )
                     if (target != null) {
                         if (target.isFolder) {
                             dropTargetCollectionId = target.id
@@ -220,9 +242,14 @@ fun Sidebar(state: AppState) {
                     collectionHitAreas.keys.toList().forEach { id ->
                         collectionHitAreas[id]?.let { collectionHitAreas[id] = it.copy(top = it.top + shift, bottom = it.bottom + shift) }
                     }
-                    val target = collectionHitAreas.values
-                        .filter { it.id != activeCollectionId }
-                        .minByOrNull { kotlin.math.abs(((it.top + it.bottom) / 2f) - cursorY) }
+                    val target = resolveClosestHitArea(
+                        areas = collectionHitAreas.values.filter {
+                            it.id != activeCollectionId &&
+                                it.parentCollectionId == collectionHitAreas[activeCollectionId]?.parentCollectionId &&
+                                isValidFolderDropTarget(state.collections, activeCollectionId, it.id)
+                        },
+                        cursorY = cursorY,
+                    )
                     if (target != null) {
                         val midY = (target.top + target.bottom) / 2f
                         dropCollectionInsertAfter = cursorY >= midY
@@ -246,6 +273,13 @@ fun Sidebar(state: AppState) {
     var renameEnvironmentValue by remember { mutableStateOf("") }
     var showCreateEnvironmentDialog by remember { mutableStateOf(false) }
     var createEnvironmentValue by remember { mutableStateOf("") }
+
+    // Remove stale rows from previous composition states (collapsed/filter changes)
+    // so drag target resolution only considers currently rendered hit areas.
+    LaunchedEffect(state.collectionsRevision, state.sidebarSearchQuery, state.collectionsExpanded) {
+        hitAreas.clear()
+        collectionHitAreas.clear()
+    }
 
     fun launchTracked(
         title: String,
@@ -271,6 +305,51 @@ fun Sidebar(state: AppState) {
         scope.launch(ioDispatcher) {
             WorkspaceRepository.save(state)
         }
+    }
+
+    LaunchedEffect(
+        state.sidebarScrollToRequestId,
+        state.collectionsRevision,
+        state.collectionsExpanded,
+        state.historyExpanded,
+        state.historyRevision,
+        state.sidebarSearchQuery,
+    ) {
+        val targetRequestId = state.sidebarScrollToRequestId ?: return@LaunchedEffect
+        if (!state.collectionsExpanded) return@LaunchedEffect
+
+        // Pre-scroll LazyColumn to the root collection item first so offscreen
+        // request rows are composed. Row-level bringIntoView will then finish
+        // precise scrolling to the request itself.
+        val targetRootId = findRootCollectionIdForRequest(state.collections, targetRequestId) ?: return@LaunchedEffect
+
+        val historyQuery = normalizeSidebarSearchQuery(state.sidebarSearchQuery)
+        val visibleHistoryCount = if (!state.historyExpanded) {
+            0
+        } else if (historyQuery.isBlank()) {
+            state.historyItems.size
+        } else {
+            state.historyItems.count { item ->
+                item.name.contains(historyQuery, ignoreCase = true) ||
+                    item.url.contains(historyQuery, ignoreCase = true)
+            }
+        }
+
+        val collectionsQuery = normalizeSidebarSearchQuery(state.sidebarSearchQuery)
+        val visibleCollections = if (collectionsQuery.isBlank()) {
+            state.collections
+        } else {
+            state.collections.mapNotNull { filterCollectionNode(it, collectionsQuery) }
+        }
+        val rootVisibleIndex = visibleCollections.indexOfFirst { it.id == targetRootId }
+        if (rootVisibleIndex < 0) return@LaunchedEffect
+
+        val lazyColumnIndex = 1 + // History header
+            (if (state.historyExpanded) visibleHistoryCount + 1 else 0) + // history rows + spacer
+            1 + // Collections header
+            rootVisibleIndex
+
+        runCatching { lazyListState.animateScrollToItem(lazyColumnIndex) }
     }
 
     Box(
@@ -512,9 +591,10 @@ fun Sidebar(state: AppState) {
                                     // Use absolute cursor position — avoids drift when the list
                                     // has scrolled (baseCenter + offsetY is wrong after a scroll).
                                     val currentY = dragCursorAbsY
-                                    val target = hitAreas.values
-                                        .filter { it.id != requestId }
-                                        .minByOrNull { kotlin.math.abs(((it.top + it.bottom) / 2f) - currentY) }
+                                    val target = resolveClosestHitArea(
+                                        areas = hitAreas.values.filter { it.id != requestId },
+                                        cursorY = currentY,
+                                    )
                                     if (target != null) {
                                         if (target.isFolder) {
                                             dropTargetCollectionId = target.id
@@ -566,6 +646,8 @@ fun Sidebar(state: AppState) {
                                 draggedCollectionId = collectionId
                                 dragCollectionOffsetY = 0f
                                 dragCursorAbsY = collectionHitAreas[collectionId]?.let { (it.top + it.bottom) / 2f } ?: 0f
+                                draggedFolderParentId = collectionHitAreas[collectionId]?.parentCollectionId
+                                draggedFolderParentIdSet = true
                                 dropCollectionTargetId = null
                                 dropCollectionInsertAfter = false
                             },
@@ -574,9 +656,15 @@ fun Sidebar(state: AppState) {
                                     dragCollectionOffsetY += deltaY
                                     dragCursorAbsY        += deltaY
                                     val currentY = dragCursorAbsY
-                                    val target = collectionHitAreas.values
-                                        .filter { it.id != collectionId }
-                                        .minByOrNull { kotlin.math.abs(((it.top + it.bottom) / 2f) - currentY) }
+                                    val parentId = draggedFolderParentId
+                                    val target = resolveClosestHitArea(
+                                        areas = collectionHitAreas.values.filter {
+                                            it.id != collectionId &&
+                                                it.parentCollectionId == parentId &&
+                                                isValidFolderDropTarget(state.collections, collectionId, it.id)
+                                        },
+                                        cursorY = currentY,
+                                    )
                                     if (target != null) {
                                         val midY = (target.top + target.bottom) / 2f
                                         dropCollectionInsertAfter = currentY >= midY
@@ -591,9 +679,9 @@ fun Sidebar(state: AppState) {
                                 val targetId = dropCollectionTargetId
                                 if (sourceId != null && targetId != null) {
                                     val moved = if (dropCollectionInsertAfter) {
-                                        moveCollectionAfterCollection(state.collections, sourceId, targetId)
+                                        moveFolderAfterFolder(state.collections, sourceId, targetId)
                                     } else {
-                                        moveCollectionBeforeCollection(state.collections, sourceId, targetId)
+                                        moveFolderBeforeFolder(state.collections, sourceId, targetId)
                                     }
                                     if (moved) {
                                         state.notifyCollectionsChanged()
@@ -602,6 +690,8 @@ fun Sidebar(state: AppState) {
                                 }
                                 draggedCollectionId = null
                                 dragCollectionOffsetY = 0f
+                                draggedFolderParentId = null
+                                draggedFolderParentIdSet = false
                                 dropCollectionTargetId = null
                                 dropCollectionInsertAfter = false
                             },
@@ -1139,19 +1229,21 @@ private fun CollectionTreeNode(
     val expanded = state.collectionExpandedState[node.id] ?: true
     val interactionSource = remember { MutableInteractionSource() }
     val isHovered by interactionSource.collectIsHoveredAsState()
-    val indent = (28 + depth * 16).dp
+    // Keep root collection close to the left rail, and increase indentation step
+    // for descendants so folder/request rows are clearly offset from parents.
+    val indent = (22 + depth * 22).dp
     val isFolderNode = node.isFolder
     val isCollectionRoot = depth == 0 && node.isFolder
     val isRequest = !node.isFolder && node.method != null && node.url != null
     val isSelectedRequest = isRequest && state.selectedRequestId == node.id
     val isDragSource = draggedRequestId == node.id
-    val isCollectionDragSource = isCollectionRoot && draggedCollectionId == node.id
+    val isCollectionDragSource = isFolderNode && draggedCollectionId == node.id
     val isDropCollectionTarget = node.isFolder && node.id == dropTargetCollectionId
     val isDropTarget = isRequest && node.id == dropTargetRequestId && node.id != draggedRequestId
     val showInsertionAbove = isDropTarget && !dropInsertAfter
     val showInsertionBelow = isDropTarget && dropInsertAfter
-    val showCollectionInsertionAbove = isCollectionRoot && node.id == dropCollectionTargetId && !dropCollectionInsertAfter
-    val showCollectionInsertionBelow = isCollectionRoot && node.id == dropCollectionTargetId && dropCollectionInsertAfter
+    val showCollectionInsertionAbove = isFolderNode && node.id == dropCollectionTargetId && !dropCollectionInsertAfter
+    val showCollectionInsertionBelow = isFolderNode && node.id == dropCollectionTargetId && dropCollectionInsertAfter
 
     var showMenu by remember { mutableStateOf(false) }
     val bringIntoViewRequester = remember { BringIntoViewRequester() }
@@ -1169,7 +1261,13 @@ private fun CollectionTreeNode(
 
     LaunchedEffect(state.sidebarScrollToRequestId, node.id) {
         if (state.sidebarScrollToRequestId == node.id) {
-            bringIntoViewRequester.bringIntoView()
+            // A single bringIntoView can run before expanded rows finish layout.
+            // Retry across a few frames so target rows in other collections with
+            // duplicate names still scroll reliably into view.
+            repeat(3) {
+                androidx.compose.runtime.withFrameNanos { }
+                runCatching { bringIntoViewRequester.bringIntoView() }
+            }
             state.sidebarScrollToRequestId = null
         }
     }
@@ -1224,13 +1322,13 @@ private fun CollectionTreeNode(
                             label = node.name,
                         )
                     )
-                    // Also register as a collection-level hit area when this is a root
-                    if (isCollectionRoot) {
+                    // Register every folder as a folder-drag target (roots + subfolders).
+                    if (isFolderNode) {
                         onCollectionHitAreaPositioned(
                             TreeNodeHitArea(
                                 id = node.id,
                                 isFolder = true,
-                                parentCollectionId = null,
+                                parentCollectionId = parentCollectionId,
                                 top = position.y,
                                 bottom = position.y + coordinates.size.height,
                                 label = node.name,
@@ -1252,7 +1350,7 @@ private fun CollectionTreeNode(
                         showMenu = true
                     }
                 }
-                .pointerInput(node.id, isRequest, isCollectionRoot) {
+                .pointerInput(node.id, isRequest, isFolderNode) {
                     when {
                         isRequest -> detectDragGestures(
                             onDragStart = { onDragStart(node.id) },
@@ -1263,7 +1361,7 @@ private fun CollectionTreeNode(
                                 change.consume()
                             },
                         )
-                        isCollectionRoot -> detectDragGestures(
+                        isFolderNode -> detectDragGestures(
                             onDragStart = { onCollectionDragStart(node.id) },
                             onDragEnd = { onCollectionDragEnd() },
                             onDragCancel = { onCollectionDragEnd() },
@@ -1288,13 +1386,13 @@ private fun CollectionTreeNode(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             if (node.isFolder) {
-                // Drag indicator for top-level collections (Bug 3)
-                if (isCollectionRoot) {
+                // Drag indicator for folders (roots + nested folders)
+                if (isFolderNode) {
                     Icon(
                         Icons.Default.DragIndicator,
                         contentDescription = Strings.t("drag_to_reorder"),
                         tint = ReqLabColors.OnSurfaceDim.copy(alpha = 0.4f),
-                        modifier = Modifier.size(12.dp).testTag("collection-drag-handle-${node.id}"),
+                        modifier = Modifier.size(12.dp).testTag("folder-drag-handle-${node.id}"),
                     )
                 }
                 Icon(
@@ -1514,8 +1612,15 @@ private fun CollectionTreeNode(
                         onDragDelta = onDragDelta,
                         onNodePositioned = onNodePositioned,
                         onDragEnd = onDragEnd,
-                        // Collection drag params are not forwarded to children
-                        // since only depth==0 nodes participate in collection reorder
+                        // Forward collection drag params so nested folders participate in
+                        // same-level reorder and register their hit areas correctly.
+                        draggedCollectionId = draggedCollectionId,
+                        dropCollectionTargetId = dropCollectionTargetId,
+                        dropCollectionInsertAfter = dropCollectionInsertAfter,
+                        onCollectionDragStart = onCollectionDragStart,
+                        onCollectionDragDelta = onCollectionDragDelta,
+                        onCollectionHitAreaPositioned = onCollectionHitAreaPositioned,
+                        onCollectionDragEnd = onCollectionDragEnd,
                     )
                 }
             }
@@ -1733,9 +1838,29 @@ private fun duplicateNode(node: CollectionNode, rootNameOverride: String? = null
     val duplicatedChildren = node.children.map { duplicateNode(it) }
     return node.copy(
         id = generateUuid(),
+        requestRef = if (node.isFolder) null else generateUuid(),
         name = rootNameOverride ?: node.name,
         children = androidx.compose.runtime.mutableStateListOf<CollectionNode>().also { it.addAll(duplicatedChildren) },
     )
+}
+
+private fun findRootCollectionIdForRequest(
+    collections: List<CollectionNode>,
+    requestId: String,
+): String? {
+    collections.forEach { root ->
+        if (!root.isFolder) return@forEach
+        if (containsRequestId(root, requestId)) return root.id
+    }
+    return null
+}
+
+private fun containsRequestId(node: CollectionNode, requestId: String): Boolean {
+    if (!node.isFolder) return node.id == requestId
+    node.children.forEach { child ->
+        if (containsRequestId(child, requestId)) return true
+    }
+    return false
 }
 
 fun filterCollectionNode(node: CollectionNode, query: String): CollectionNode? {
@@ -1990,7 +2115,7 @@ private fun findRequestParentAndIndex(
     return null
 }
 
-private fun findCollectionById(nodes: MutableList<CollectionNode>, collectionId: String): CollectionNode? {
+private fun findCollectionById(nodes: List<CollectionNode>, collectionId: String): CollectionNode? {
     nodes.forEach { node ->
         if (node.isFolder && node.id == collectionId) {
             return node
@@ -2001,6 +2126,17 @@ private fun findCollectionById(nodes: MutableList<CollectionNode>, collectionId:
         }
     }
     return null
+}
+
+fun isValidFolderDropTarget(
+    collections: List<CollectionNode>,
+    sourceFolderId: String,
+    targetFolderId: String,
+): Boolean {
+    if (sourceFolderId == targetFolderId) return false
+    val sourceNode = findCollectionById(collections, sourceFolderId) ?: return false
+    if (!sourceNode.isFolder) return false
+    return !containsFolderId(sourceNode, targetFolderId)
 }
 
 /**
@@ -2054,4 +2190,75 @@ fun moveCollectionAfterCollection(
     val insertIndex = if (fromIndex < toIndex) toIndex else toIndex + 1
     collections.add(insertIndex, item)
     return true
+}
+
+// ── Folder drag-to-reorder helpers (roots + nested folders) ─────────────────
+
+fun moveFolderBeforeFolder(
+    collections: MutableList<CollectionNode>,
+    folderId: String,
+    targetFolderId: String,
+): Boolean {
+    if (folderId == targetFolderId) return false
+    val sourceNode = findCollectionById(collections, folderId) ?: return false
+    if (!sourceNode.isFolder) return false
+    if (containsFolderId(sourceNode, targetFolderId)) return false
+
+    val extracted = extractFolderNode(collections, folderId) ?: return false
+    val target = findFolderParentAndIndex(collections, targetFolderId) ?: return false
+    val insertIndex = target.second.coerceIn(0, target.first.size)
+    target.first.add(insertIndex, extracted)
+    return true
+}
+
+fun moveFolderAfterFolder(
+    collections: MutableList<CollectionNode>,
+    folderId: String,
+    targetFolderId: String,
+): Boolean {
+    if (folderId == targetFolderId) return false
+    val sourceNode = findCollectionById(collections, folderId) ?: return false
+    if (!sourceNode.isFolder) return false
+    if (containsFolderId(sourceNode, targetFolderId)) return false
+
+    val extracted = extractFolderNode(collections, folderId) ?: return false
+    val target = findFolderParentAndIndex(collections, targetFolderId) ?: return false
+    val insertIndex = (target.second + 1).coerceIn(0, target.first.size)
+    target.first.add(insertIndex, extracted)
+    return true
+}
+
+private fun extractFolderNode(nodes: MutableList<CollectionNode>, folderId: String): CollectionNode? {
+    val index = nodes.indexOfFirst { it.isFolder && it.id == folderId }
+    if (index >= 0) return nodes.removeAt(index)
+    for (node in nodes) {
+        if (node.isFolder && node.children.isNotEmpty()) {
+            val extracted = extractFolderNode(node.children, folderId)
+            if (extracted != null) return extracted
+        }
+    }
+    return null
+}
+
+private fun findFolderParentAndIndex(
+    nodes: MutableList<CollectionNode>,
+    folderId: String,
+): Pair<MutableList<CollectionNode>, Int>? {
+    val index = nodes.indexOfFirst { it.isFolder && it.id == folderId }
+    if (index >= 0) return nodes to index
+    for (node in nodes) {
+        if (node.isFolder && node.children.isNotEmpty()) {
+            val found = findFolderParentAndIndex(node.children, folderId)
+            if (found != null) return found
+        }
+    }
+    return null
+}
+
+private fun containsFolderId(node: CollectionNode, folderId: String): Boolean {
+    if (node.id == folderId) return true
+    node.children.forEach { child ->
+        if (child.isFolder && containsFolderId(child, folderId)) return true
+    }
+    return false
 }

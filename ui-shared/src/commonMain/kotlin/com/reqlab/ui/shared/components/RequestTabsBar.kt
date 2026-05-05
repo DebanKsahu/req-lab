@@ -127,7 +127,6 @@ fun RequestTabsBar(
                             isActive = index == state.activeTabIndex,
                             onClick = {
                                 state.activeTabIndex = index
-                                state.selectedRequestId = tab.id
                             },
                             onClose = { onRequestClose(index) },
                             onRename = { newName -> onRenameTab(tab.id, newName) },

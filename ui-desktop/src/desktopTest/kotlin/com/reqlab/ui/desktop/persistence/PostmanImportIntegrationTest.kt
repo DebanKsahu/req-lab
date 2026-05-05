@@ -125,6 +125,38 @@ class PostmanImportIntegrationTest {
         assertEquals("ReqLab Native", name)
     }
 
+    @Test
+    fun importCollectionFromString_reqLabFormat_regenerates_collection_and_folder_ids_per_import() {
+        val state = AppState(withDemoData = false)
+        val reqLabJson = """
+        {
+          "type": "reqLabCollection",
+          "version": "1.0",
+          "id": "fixed-collection-id",
+          "name": "ReqLab Native",
+          "folders": [
+            { "id": "fixed-folder-id", "name": "Users", "folders": [], "requests": [] }
+          ],
+          "requests": []
+        }
+        """.trimIndent()
+
+        ImportExportRepository.importCollectionFromString(state, reqLabJson)
+        ImportExportRepository.importCollectionFromString(state, reqLabJson)
+
+        assertEquals(2, state.collections.size)
+        val first = state.collections[0]
+        val second = state.collections[1]
+
+        assertTrue(first.id != second.id, "Imported collections must not share IDs")
+        assertEquals("Users", first.children.first().name)
+        assertEquals("Users", second.children.first().name)
+        assertTrue(
+            first.children.first().id != second.children.first().id,
+            "Imported folders must not share IDs"
+        )
+    }
+
     // ── environment import ─────────────────────────────────────────────────────
 
     @Test

@@ -59,6 +59,7 @@ data class FolderDto(
 )
 
 data class RequestDto(
+    val requestRef: String? = null,
     val name: String,
     val method: String,
     val url: String,
@@ -130,7 +131,7 @@ object ImportExportRepository {
         }
         val existingNames = state.collections.map { it.name }.toMutableSet()
         val uniqueName = ImportExportNaming.generateUniqueCollectionName(dto.name, existingNames)
-        state.collections.add(collectionDtoToNode(dto, uniqueName))
+        state.collections.add(collectionDtoToNode(dto, uniqueName, preserveIds = false))
         return uniqueName
     }
 
@@ -226,7 +227,7 @@ object ImportExportRepository {
         var importedCollections = 0
         workspace.collections.forEach { collection ->
             val uniqueName = ImportExportNaming.generateUniqueCollectionName(collection.name, existingCollections)
-            state.collections.add(collectionDtoToNode(collection, uniqueName))
+            state.collections.add(collectionDtoToNode(collection, uniqueName, preserveIds = true))
             existingCollections.add(uniqueName)
             importedCollections++
         }
@@ -245,7 +246,7 @@ object ImportExportRepository {
 
     fun replaceWorkspaceState(state: AppState, workspace: ReqLabWorkspaceDto) {
         state.collections.clear()
-        state.collections.addAll(workspace.collections.map { collectionDtoToNode(it, it.name) })
+        state.collections.addAll(workspace.collections.map { collectionDtoToNode(it, it.name, preserveIds = true) })
 
         state.environments.clear()
         state.environments.addAll(workspace.environments.map { environmentDtoToState(it, it.name) })
@@ -340,6 +341,7 @@ object ImportExportRepository {
         val method = node.method ?: return null
         val url = node.url ?: ""
         return buildJsonObject {
+            node.requestRef?.let { put("requestRef", it) }
             put("name", node.name)
             put("method", method.name)
             put("url", url)
@@ -460,6 +462,7 @@ object ImportExportRepository {
 
     private fun requestDtoToJson(dto: RequestDto): JsonObject =
         buildJsonObject {
+            dto.requestRef?.let { put("requestRef", it) }
             put("name", dto.name)
             put("method", dto.method)
             put("url", dto.url)
@@ -573,6 +576,7 @@ object ImportExportRepository {
     }
 
     private fun requestDtoFromJson(root: JsonObject): RequestDto {
+        val requestRef = root["requestRef"]?.jsonPrimitive?.contentOrNull
         val name = root["name"]?.jsonPrimitive?.contentOrNull
             ?: throw ImportExportException("Request name is missing")
         val method = root["method"]?.jsonPrimitive?.contentOrNull ?: "GET"
@@ -613,6 +617,7 @@ object ImportExportRepository {
         val authApiKey = authObj?.get("apiKey")?.jsonPrimitive?.contentOrNull
         val authApiValue = authObj?.get("apiValue")?.jsonPrimitive?.contentOrNull
         return RequestDto(
+            requestRef = requestRef,
             name = name, method = method, url = url,
             preRequestScript = preRequestScript, testScript = testScript,
             userHeaders = userHeaders,
@@ -696,24 +701,28 @@ object ImportExportRepository {
         return ReqLabEnvironmentDto(name = name, variables = variables)
     }
 
-    private fun collectionDtoToNode(dto: ReqLabCollectionDto, nameOverride: String): CollectionNode {
+    private fun collectionDtoToNode(
+        dto: ReqLabCollectionDto,
+        nameOverride: String,
+        preserveIds: Boolean,
+    ): CollectionNode {
         val children = mutableStateListOf<CollectionNode>()
-        dto.folders.forEach { children.add(folderDtoToNode(it)) }
+        dto.folders.forEach { children.add(folderDtoToNode(it, preserveIds)) }
         dto.requests.forEach { children.add(requestDtoToNode(it)) }
         return CollectionNode(
-            id = dto.id ?: generateUuid(),
+            id = if (preserveIds) dto.id ?: generateUuid() else generateUuid(),
             name = nameOverride,
             isFolder = true,
             children = children,
         )
     }
 
-    private fun folderDtoToNode(dto: FolderDto): CollectionNode {
+    private fun folderDtoToNode(dto: FolderDto, preserveIds: Boolean): CollectionNode {
         val children = mutableStateListOf<CollectionNode>()
-        dto.folders.forEach { children.add(folderDtoToNode(it)) }
+        dto.folders.forEach { children.add(folderDtoToNode(it, preserveIds)) }
         dto.requests.forEach { children.add(requestDtoToNode(it)) }
         return CollectionNode(
-            id = dto.id ?: generateUuid(),
+            id = if (preserveIds) dto.id ?: generateUuid() else generateUuid(),
             name = dto.name,
             isFolder = true,
             children = children,
@@ -726,6 +735,7 @@ object ImportExportRepository {
         val authType = dto.authType?.let { runCatching { AuthType.valueOf(it.uppercase()) }.getOrNull() }
         return CollectionNode(
             id = generateUuid(),
+            requestRef = dto.requestRef ?: generateUuid(),
             name = dto.name,
             isFolder = false,
             method = method,

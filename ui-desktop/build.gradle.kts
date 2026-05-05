@@ -1,3 +1,5 @@
+import java.util.zip.ZipFile
+
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.composeMultiplatform)
@@ -89,6 +91,8 @@ tasks.register<org.gradle.jvm.tasks.Jar>("packageReqLabJar") {
     val desktopJarTask = tasks.named<org.gradle.jvm.tasks.Jar>("desktopJar")
     val desktopRuntimeClasspath = configurations.named("desktopRuntimeClasspath")
 
+    notCompatibleWithConfigurationCache("Merges META-INF/services entries at execution time from runtime JARs")
+
     dependsOn(desktopJarTask)
 
     archiveBaseName.set("ReqLab")
@@ -101,20 +105,69 @@ tasks.register<org.gradle.jvm.tasks.Jar>("packageReqLabJar") {
         attributes["Main-Class"] = mainClassName
     }
 
-    // Include compiled classes/resources from the desktop jar.
-    from(desktopJarTask.map { zipTree(it.archiveFile.get().asFile) })
+    // GraalVM Truffle languages (js, regex, etc.) each register themselves via
+    // META-INF/services/. DuplicatesStrategy.EXCLUDE would silently drop all but the
+    // first entry, causing "No language for id regex found" at runtime.
+    // Fix: exclude services from all sources, merge them manually in doFirst, then
+    // include the merged result (added first so it wins the EXCLUDE dedup).
+    val mergedServicesDir = layout.buildDirectory.dir("tmp/merged-services")
+    from(mergedServicesDir)
 
-    // Include all runtime dependency jars so the artifact is self-contained.
+    // Include compiled classes/resources from the desktop jar (services merged separately).
+    from(desktopJarTask.map { zipTree(it.archiveFile.get().asFile) }) {
+        exclude("META-INF/services/**")
+    }
+
+    // Include all runtime dependency jars so the artifact is self-contained (services merged separately).
     from(
         desktopRuntimeClasspath.map { files ->
             files
                 .filter { it.name.endsWith(".jar") }
                 .map { zipTree(it) }
         }
-    )
+    ) {
+        exclude("META-INF/services/**")
+    }
 
     // Drop signature metadata that becomes invalid when jars are merged.
     exclude("META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA")
+
+    // Collect and merge all META-INF/services entries from every input JAR so that all
+    // Truffle language providers (js, regex, icu, etc.) are present in the service loader.
+    doFirst {
+        val outDir = mergedServicesDir.get().asFile
+        outDir.deleteRecursively()
+
+        val serviceMap = mutableMapOf<String, LinkedHashSet<String>>()
+
+        val allJars = buildList {
+            add(desktopJarTask.get().archiveFile.get().asFile)
+            addAll(desktopRuntimeClasspath.get().filter { it.name.endsWith(".jar") })
+        }
+
+        allJars.forEach { jarFile ->
+            if (!jarFile.exists()) return@forEach
+            ZipFile(jarFile).use { zip ->
+                val entries = zip.entries()
+                while (entries.hasMoreElements()) {
+                    val entry = entries.nextElement()
+                    if (!entry.name.startsWith("META-INF/services/") || entry.isDirectory) continue
+
+                    val lines = zip.getInputStream(entry).bufferedReader().use { reader ->
+                        reader.readLines()
+                            .filter { line -> line.isNotBlank() && !line.trimStart().startsWith("#") }
+                    }
+                    serviceMap.getOrPut(entry.name) { linkedSetOf() }.addAll(lines)
+                }
+            }
+        }
+
+        serviceMap.forEach { (path, implementations) ->
+            val file = outDir.resolve(path)
+            file.parentFile.mkdirs()
+            file.writeText(implementations.joinToString("\n") + "\n")
+        }
+    }
 
     description = "Builds a runnable fat JAR at build/distribute/ReqLab-{version}.jar"
     group = "distribution"

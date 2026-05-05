@@ -582,6 +582,17 @@ class PostmanImporterTest {
         assertTrue(result.contains("// pm.execution.skipRequest is not supported in ReqLab"))
     }
 
+    @Test
+    fun `convertScript does not inject setNextRequest comments for lookalike method names`() {
+      val input = """
+        pm.execution.setNextRequestEnabled(true);
+        postman.setNextRequestEnabled(false);
+      """.trimIndent()
+      val result = PostmanImporter.convertScript(input)
+      assertFalse(result.contains("not supported in ReqLab"), "comment should not be injected for non-matching API names")
+      assertTrue(result.contains("setNextRequestEnabled"), "lookalike method names must be preserved")
+    }
+
     // ── convertScript – pm.info / stubs ───────────────────────────────────────
 
     @Test

@@ -320,8 +320,14 @@ object PostmanImporter {
             .replace(Regex("""\bpm\.response\.to\.be\.ok\b"""), "reqlab.response.statusOk()")
 
             // ── Unsupported operations — comment them out ─────────────────────
-            .replace("pm.execution.setNextRequest(", "// pm.execution.setNextRequest is not supported in ReqLab\n// pm.execution.setNextRequest(")
-            .replace("pm.execution.skipRequest(", "// pm.execution.skipRequest is not supported in ReqLab\n// pm.execution.skipRequest(")
+            .replace(
+                Regex("""\bpm\.execution\.setNextRequest\s*\("""),
+                "// pm.execution.setNextRequest is not supported in ReqLab\n// pm.execution.setNextRequest(",
+            )
+            .replace(
+                Regex("""\bpm\.execution\.skipRequest\s*\("""),
+                "// pm.execution.skipRequest is not supported in ReqLab\n// pm.execution.skipRequest(",
+            )
             // pm.sendRequest is fully supported — translate directly
             .replace("pm.sendRequest(", "reqlab.sendRequest(")
 
@@ -349,7 +355,10 @@ object PostmanImporter {
             .replace("postman.setGlobalVariable(", "reqlab.globals.set(")
             .replace("postman.clearGlobalVariable(", "reqlab.globals.unset(")
             .replace("postman.clearGlobalVariables(", "reqlab.globals.clear(")
-            .replace("postman.setNextRequest(", "// postman.setNextRequest is not supported in ReqLab\n// postman.setNextRequest(")
+            .replace(
+                Regex("""\bpostman\.setNextRequest\s*\("""),
+                "// postman.setNextRequest is not supported in ReqLab\n// postman.setNextRequest(",
+            )
 
             // ── Legacy global sandbox shortcuts ───────────────────────────────
             .replace("responseCode.code", "response.code")

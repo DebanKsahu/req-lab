@@ -3,6 +3,7 @@ package com.reqlab.ui.shared.state
 import androidx.compose.runtime.mutableStateListOf
 import com.reqlab.core.model.BodyType
 import com.reqlab.core.model.HttpMethodType
+import com.reqlab.ui.shared.components.moveRequestToCollection
 import org.junit.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -375,6 +376,139 @@ class AppStateCollectionTest {
 
         assertEquals("r1", state.selectedRequestId)
         assertEquals("r1", state.activeTab?.id)
+    }
+
+    @Test
+    fun revealRequestInSidebar_uses_tab_collection_and_signature_when_tab_id_is_stale() {
+        val state = AppState(openDefaultTab = false, withDemoData = false)
+
+        val requestA = CollectionNode("ra", "Users", isFolder = false, method = HttpMethodType.GET, url = "https://a.example.com/users")
+        val requestB = CollectionNode("rb", "Users", isFolder = false, method = HttpMethodType.GET, url = "https://b.example.com/users")
+        state.collections.add(CollectionNode("ca", "API A", isFolder = true, children = mutableStateListOf(requestA)))
+        state.collections.add(CollectionNode("cb", "API B", isFolder = true, children = mutableStateListOf(requestB)))
+
+        // Tab points to API B by metadata, but carries a stale id "ra" that exists in API A.
+        state.openTabs.add(
+            RequestTabState(
+                id = "ra",
+                name = "Users",
+                method = HttpMethodType.GET,
+                url = "https://b.example.com/users",
+                collectionName = "API B",
+                collectionId = "cb",
+            )
+        )
+        state.activeTabIndex = 0
+
+        val ok = state.revealRequestInSidebar("ra")
+
+        assertTrue(ok)
+        assertEquals("rb", state.selectedRequestId, "Show in sidebar must resolve by tab scope+signature, not stale tab id")
+    }
+
+    @Test
+    fun syncSidebarToActiveTab_prefers_signature_over_existing_stale_tab_id_for_duplicates() {
+        val state = AppState(openDefaultTab = false, withDemoData = false)
+
+        val requestA = CollectionNode("ra", "Users", isFolder = false, method = HttpMethodType.GET, url = "https://a.example.com/users")
+        val requestB = CollectionNode("rb", "Users", isFolder = false, method = HttpMethodType.GET, url = "https://b.example.com/users")
+        state.collections.add(CollectionNode("ca", "API", isFolder = true, children = mutableStateListOf(requestA)))
+        state.collections.add(CollectionNode("cb", "API", isFolder = true, children = mutableStateListOf(requestB)))
+
+        // Simulate old persisted tab: stale id points to existing duplicate in collection A,
+        // while method/url points to request B in collection B.
+        state.openTabs.add(
+            RequestTabState(
+                id = "ra",
+                name = "Users",
+                method = HttpMethodType.GET,
+                url = "https://b.example.com/users",
+                collectionName = "API",
+                collectionId = null,
+            )
+        )
+        state.activeTabIndex = 0
+
+        state.syncSidebarToActiveTab()
+
+        assertEquals("rb", state.selectedRequestId, "Sidebar sync must resolve by signature, not stale tab id")
+        assertEquals("rb", state.sidebarScrollToRequestId, "Sidebar must scroll to the resolved request")
+    }
+
+    @Test
+    fun syncSidebarToActiveTab_keeps_valid_duplicate_request_id_after_other_duplicate_is_moved() {
+        val state = AppState(openDefaultTab = false, withDemoData = false)
+
+        val c1r1 = CollectionNode("c1-r1", "r1", isFolder = false, method = HttpMethodType.GET, url = "https://api.example.com/r1")
+        val c2r1 = CollectionNode("c2-r1", "r1", isFolder = false, method = HttpMethodType.GET, url = "https://api.example.com/r1")
+        state.collections.add(CollectionNode("c1", "c1", isFolder = true, children = mutableStateListOf(c1r1)))
+        state.collections.add(CollectionNode("c2", "c2", isFolder = true, children = mutableStateListOf(c2r1)))
+        state.collections.add(CollectionNode("c3", "c3", isFolder = true, children = mutableStateListOf()))
+
+        state.openRequest(requestId = "c1-r1", name = "r1", method = HttpMethodType.GET, url = "https://api.example.com/r1")
+        state.openRequest(requestId = "c2-r1", name = "r1", method = HttpMethodType.GET, url = "https://api.example.com/r1")
+
+        val moved = moveRequestToCollection(state.collections, "c1-r1", "c3")
+        assertTrue(moved)
+        state.notifyCollectionsChanged()
+
+        val c2TabIndex = state.openTabs.indexOfFirst { it.id == "c2-r1" }
+        assertTrue(c2TabIndex >= 0)
+        state.activeTabIndex = c2TabIndex
+        state.syncSidebarToActiveTab()
+
+        assertEquals("c2-r1", state.selectedRequestId, "Tab from c2 must continue resolving to c2 request")
+    }
+
+    @Test
+    fun notifyCollectionsChanged_updates_open_tab_collection_metadata_after_request_move() {
+        val state = AppState(openDefaultTab = false, withDemoData = false)
+
+        val c1r1 = CollectionNode("c1-r1", "r1", isFolder = false, method = HttpMethodType.GET, url = "https://api.example.com/r1")
+        state.collections.add(CollectionNode("c1", "c1", isFolder = true, children = mutableStateListOf(c1r1)))
+        state.collections.add(CollectionNode("c3", "c3", isFolder = true, children = mutableStateListOf()))
+
+        state.openRequest(requestId = "c1-r1", name = "r1", method = HttpMethodType.GET, url = "https://api.example.com/r1")
+        val movedTab = state.openTabs.first { it.id == "c1-r1" }
+        assertEquals("c1", movedTab.collectionId)
+        assertEquals("c1", movedTab.collectionName)
+
+        val moved = moveRequestToCollection(state.collections, "c1-r1", "c3")
+        assertTrue(moved)
+        state.notifyCollectionsChanged()
+
+        assertEquals("c3", movedTab.collectionId)
+        assertEquals("c3", movedTab.collectionName)
+        assertEquals(emptyList(), movedTab.folderPath)
+    }
+
+    @Test
+    fun revealRequestInSidebar_prefers_signature_when_duplicate_request_names_exist() {
+        val state = AppState(openDefaultTab = false, withDemoData = false)
+
+        val reqA = CollectionNode("req-a", "Users", isFolder = false, method = HttpMethodType.GET, url = "https://api-a.example.com/users")
+        val reqB = CollectionNode("req-b", "Users", isFolder = false, method = HttpMethodType.GET, url = "https://api-b.example.com/users")
+        state.collections.add(CollectionNode("coll-a", "API", isFolder = true, children = mutableStateListOf(reqA)))
+        state.collections.add(CollectionNode("coll-b", "API", isFolder = true, children = mutableStateListOf(reqB)))
+
+        // Simulate a restored tab with stale tab id and no collectionId metadata.
+        state.openTabs.add(
+            RequestTabState(
+                id = "stale-tab-id",
+                name = "Users",
+                method = HttpMethodType.GET,
+                url = "https://api-b.example.com/users",
+                collectionName = "API",
+                collectionId = null,
+                folderPath = emptyList(),
+            )
+        )
+        state.activeTabIndex = 0
+
+        val ok = state.revealRequestInSidebar("stale-tab-id")
+
+        assertTrue(ok)
+        assertEquals("req-b", state.selectedRequestId, "Show in sidebar must resolve to matching method+url, not first duplicate by name")
     }
 
     // ── Issue 3: syncSidebarToActiveTab after restoration ─────────
@@ -783,5 +917,160 @@ class AppStateCollectionTest {
         assertTrue(state.openTabs.isEmpty())
         // Should not throw
         state.updateTabsCollectionName("oldName", "newName")
+    }
+
+    @Test
+    fun syncSidebarToActiveTab_uses_requestRef_when_tab_id_is_stale() {
+        val state = AppState(openDefaultTab = false, withDemoData = false)
+
+        val req = CollectionNode(
+            id = "real-id",
+            name = "Users",
+            isFolder = false,
+            method = HttpMethodType.GET,
+            url = "https://api.example.com/users",
+            requestRef = "ref-users",
+        )
+        state.collections.add(
+            CollectionNode(
+                id = "c1",
+                name = "Users API",
+                isFolder = true,
+                children = mutableStateListOf(req),
+            )
+        )
+
+        state.openTabs.add(
+            RequestTabState(
+                id = "stale-id",
+                requestRef = "ref-users",
+                name = "Users",
+                method = HttpMethodType.GET,
+                url = "https://api.example.com/users",
+            )
+        )
+        state.activeTabIndex = 0
+
+        state.syncSidebarToActiveTab()
+
+        assertEquals("real-id", state.selectedRequestId)
+    }
+
+    @Test
+    fun revealRequestInSidebar_uses_requestRef_when_tab_id_is_stale() {
+        val state = AppState(openDefaultTab = false, withDemoData = false)
+
+        val req = CollectionNode(
+            id = "real-id",
+            name = "Users",
+            isFolder = false,
+            method = HttpMethodType.GET,
+            url = "https://api.example.com/users",
+            requestRef = "ref-users",
+        )
+        state.collections.add(
+            CollectionNode(
+                id = "c1",
+                name = "Users API",
+                isFolder = true,
+                children = mutableStateListOf(req),
+            )
+        )
+
+        state.openTabs.add(
+            RequestTabState(
+                id = "stale-id",
+                requestRef = "ref-users",
+                name = "Users",
+                method = HttpMethodType.GET,
+                url = "https://api.example.com/users",
+            )
+        )
+        state.activeTabIndex = 0
+
+        val ok = state.revealRequestInSidebar("stale-id")
+
+        assertTrue(ok)
+        assertEquals("real-id", state.selectedRequestId)
+    }
+
+    // ── Bug repro: show-in-sidebar for same-name requests in different collections ──
+
+    @Test
+    fun revealRequestInSidebar_resolves_correct_request_when_same_name_and_url_in_different_collections() {
+        // Two collections each containing a request with identical name + method + url.
+        // Opening both from the sidebar (within the same session) gives each tab a
+        // correct collectionId.  Show-in-sidebar must resolve to the right one.
+        val state = AppState(openDefaultTab = false, withDemoData = false)
+
+        val r1a = CollectionNode("r1a", "GetUsers", isFolder = false, method = HttpMethodType.GET, url = "https://api.example.com/users")
+        val r1b = CollectionNode("r1b", "GetUsers", isFolder = false, method = HttpMethodType.GET, url = "https://api.example.com/users")
+        state.collections.add(CollectionNode("c1", "c1", isFolder = true, children = mutableStateListOf(r1a)))
+        state.collections.add(CollectionNode("c2", "c2", isFolder = true, children = mutableStateListOf(r1b)))
+
+        state.openRequest(requestId = "r1a", name = "GetUsers", method = HttpMethodType.GET, url = "https://api.example.com/users")
+        state.openRequest(requestId = "r1b", name = "GetUsers", method = HttpMethodType.GET, url = "https://api.example.com/users")
+
+        // Show in sidebar for c1's request
+        val ok1 = state.revealRequestInSidebar("r1a")
+        assertTrue(ok1)
+        assertEquals("r1a", state.selectedRequestId, "Show in sidebar must resolve to c1's request, not c2's duplicate")
+
+        // Show in sidebar for c2's request
+        val ok2 = state.revealRequestInSidebar("r1b")
+        assertTrue(ok2)
+        assertEquals("r1b", state.selectedRequestId, "Show in sidebar must resolve to c2's request, not c1's duplicate")
+    }
+
+    @Test
+    fun syncSidebarToActiveTab_resolves_correct_request_when_same_name_and_url_in_different_collections() {
+        // Clicking a tab in the topbar must sync the sidebar to the correct duplicate.
+        val state = AppState(openDefaultTab = false, withDemoData = false)
+
+        val r1a = CollectionNode("r1a", "GetUsers", isFolder = false, method = HttpMethodType.GET, url = "https://api.example.com/users")
+        val r1b = CollectionNode("r1b", "GetUsers", isFolder = false, method = HttpMethodType.GET, url = "https://api.example.com/users")
+        state.collections.add(CollectionNode("c1", "c1", isFolder = true, children = mutableStateListOf(r1a)))
+        state.collections.add(CollectionNode("c2", "c2", isFolder = true, children = mutableStateListOf(r1b)))
+
+        state.openRequest(requestId = "r1a", name = "GetUsers", method = HttpMethodType.GET, url = "https://api.example.com/users")
+        state.openRequest(requestId = "r1b", name = "GetUsers", method = HttpMethodType.GET, url = "https://api.example.com/users")
+
+        // Switch to c1's tab
+        state.activeTabIndex = 0
+        state.syncSidebarToActiveTab()
+        assertEquals("r1a", state.selectedRequestId, "Sidebar sync for c1 tab must select c1's request")
+
+        // Switch to c2's tab
+        state.activeTabIndex = 1
+        state.syncSidebarToActiveTab()
+        assertEquals("r1b", state.selectedRequestId, "Sidebar sync for c2 tab must select c2's request")
+    }
+
+    @Test
+    fun tabMatchesRequestScope_uses_collectionId_only_ignoring_stale_collection_name() {
+        // After a collection rename between sessions, the stored collectionName on the tab
+        // may be stale.  The resolver must trust collectionId, not the name.
+        val state = AppState(openDefaultTab = false, withDemoData = false)
+
+        val req = CollectionNode("req1", "GetUsers", isFolder = false, method = HttpMethodType.GET, url = "https://api.example.com/users")
+        state.collections.add(CollectionNode("c1", "New API Name", isFolder = true, children = mutableStateListOf(req)))
+
+        // Tab has the old collection name but the correct collection ID
+        state.openTabs.add(
+            RequestTabState(
+                id = "req1",
+                name = "GetUsers",
+                method = HttpMethodType.GET,
+                url = "https://api.example.com/users",
+                collectionId = "c1",
+                collectionName = "Old API Name",  // stale — collection was renamed
+            )
+        )
+        state.activeTabIndex = 0
+
+        // Show in sidebar must succeed despite stale collection name
+        val ok = state.revealRequestInSidebar("req1")
+        assertTrue(ok)
+        assertEquals("req1", state.selectedRequestId, "Stale collectionName must not block resolution when collectionId matches")
     }
 }
