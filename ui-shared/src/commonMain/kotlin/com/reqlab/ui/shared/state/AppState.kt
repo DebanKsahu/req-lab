@@ -672,6 +672,13 @@ class AppState(openDefaultTab: Boolean = true, withDemoData: Boolean = false) {
         val url: String,
     )
 
+    data class ScriptRequestTarget(
+        val requestId: String,
+        val name: String,
+        val method: HttpMethodType,
+        val url: String,
+    )
+
     // ── actions ──────────────────────────────────────────────────
 
     fun addTab(
@@ -1191,6 +1198,40 @@ class AppState(openDefaultTab: Boolean = true, withDemoData: Boolean = false) {
         if (historyItems.isEmpty()) return
         historyItems.clear()
         historyRevision++
+    }
+
+    /**
+     * Resolves a script-provided next-request token to an existing request
+     * across collections.
+     *
+     * Matching order:
+     * 1) exact request id
+     * 2) exact requestRef
+     * 3) exact request name (preferring [preferredCollectionId] when provided)
+     */
+    fun resolveScriptRequestTarget(token: String, preferredCollectionId: String? = null): ScriptRequestTarget? {
+        val normalized = token.trim()
+        if (normalized.isEmpty()) return null
+        val refs = buildRequestReferenceMap().values.toList()
+
+        refs.firstOrNull { it.requestId == normalized }?.let {
+            return ScriptRequestTarget(it.requestId, it.name, it.method, it.url)
+        }
+        refs.firstOrNull { it.requestRef == normalized }?.let {
+            return ScriptRequestTarget(it.requestId, it.name, it.method, it.url)
+        }
+
+        val byName = refs.filter { it.name == normalized }
+        if (byName.isEmpty()) return null
+
+        val preferred = preferredCollectionId?.let { cid -> byName.filter { it.collectionId == cid } }.orEmpty()
+        val winner = when {
+            preferred.size == 1 -> preferred.first()
+            byName.size == 1 -> byName.first()
+            else -> null
+        } ?: return null
+
+        return ScriptRequestTarget(winner.requestId, winner.name, winner.method, winner.url)
     }
 
     fun removeHistoryItem(requestId: String) {

@@ -164,6 +164,9 @@ class ReqLabScriptEngine(
         newCollectionVariables = base.newCollectionVariables + cb.newCollectionVariables,
         newRequestVariables = base.newRequestVariables + cb.newRequestVariables,
         requestMutations = mergeRequestMutations(base.requestMutations, cb.requestMutations),
+        executionSetNextRequestCalled = cb.executionSetNextRequestCalled || base.executionSetNextRequestCalled,
+        executionNextRequest = if (cb.executionSetNextRequestCalled) cb.executionNextRequest else base.executionNextRequest,
+        executionSkipRequest = cb.executionSkipRequest || base.executionSkipRequest,
     )
 
     private fun mergeRequestMutations(base: ScriptRequestMutations, cb: ScriptRequestMutations) =
@@ -228,6 +231,11 @@ class ReqLabScriptEngine(
             queryParams = jsonObjectToMap(mutObj?.get("queryParams")),
         )
 
+        val execObj = root["execution"]?.jsonObject
+        val executionSetNextRequestCalled = execObj?.get("setNextRequestCalled")?.jsonPrimitive?.booleanOrNull ?: false
+        val executionNextRequest = execObj?.get("nextRequest")?.jsonPrimitive?.contentOrNull
+        val executionSkipRequest = execObj?.get("skipRequest")?.jsonPrimitive?.booleanOrNull ?: false
+
         return ScriptResult(
             success = error == null && tests.all { it.passed },
             logs = logs,
@@ -238,6 +246,9 @@ class ReqLabScriptEngine(
             newCollectionVariables = collVars,
             newRequestVariables = reqVars,
             requestMutations = mutations,
+            executionSetNextRequestCalled = executionSetNextRequestCalled,
+            executionNextRequest = executionNextRequest,
+            executionSkipRequest = executionSkipRequest,
         )
     }
 

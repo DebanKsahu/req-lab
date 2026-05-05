@@ -579,8 +579,6 @@ if (response.code === 200) {
     reqlab.environment.set('SESSION_ID', jsonData.sessionId);
     reqlab.environment.set('ORG_ID', jsonData.orgId);
 } else {
-    // postman.setNextRequest is not supported in ReqLab
-    // postman.setNextRequest(null);
     console.log("Login failed for user " + reqlab.environment.get('USERNAME'));
 }
 ```

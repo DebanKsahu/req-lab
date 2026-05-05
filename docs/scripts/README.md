@@ -37,6 +37,8 @@ The global (prefix-free) API is also supported for backward compatibility.
 | `reqlab.collectionVariables.get/set/unset(key)` | Collection variables |
 | `reqlab.variables.get/set/unset(key)` | Merged variable lookup + request-local overrides |
 | `reqlab.console.log(...)` | Log to the script output panel |
+| `reqlab.execution.setNextRequest(nameOrIdOrRef)` | Chain to another saved request |
+| `reqlab.execution.skipRequest()` | Skip current request from pre-request script |
 
 ## Runtime behavior summary
 

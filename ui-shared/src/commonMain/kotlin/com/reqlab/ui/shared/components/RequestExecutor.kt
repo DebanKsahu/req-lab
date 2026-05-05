@@ -37,6 +37,7 @@ import kotlinx.coroutines.withContext
  * state properties.  All heavy work runs off the main thread.
  */
 private const val BINARY_ATTACHMENT_PREFIX = "reqlab-binary:"
+private const val MAX_SCRIPT_CHAIN_DEPTH = 16
 
 /**
  * Executes a sub-HTTP request from a [reqlab.sendRequest()] script call.
@@ -74,6 +75,10 @@ private suspend fun executeSubRequest(client: ApiClient, spec: SendRequestSpec):
 }
 
 fun sendRequest(scope: CoroutineScope, state: AppState, tab: RequestTabState) {
+    sendRequestInternal(scope, state, tab, chainDepth = 0)
+}
+
+private fun sendRequestInternal(scope: CoroutineScope, state: AppState, tab: RequestTabState, chainDepth: Int) {
     if (tab.url.isBlank()) {
         state.log("URL is empty", LogLevel.WARNING)
         return
@@ -151,6 +156,12 @@ fun sendRequest(scope: CoroutineScope, state: AppState, tab: RequestTabState) {
             }
             if (preResult.newCollectionVariables.isNotEmpty()) {
                 state.mergeCollectionScriptVariables(preResult.newCollectionVariables)
+            }
+            if (preResult.executionSkipRequest) {
+                state.log("↷ Request skipped by script", LogLevel.INFO)
+                tab.isLoading = false
+                tab.currentJob = null
+                return@launch
             }
             if (preResult.requestMutations.url != null) {
                 effectiveUrl = preResult.requestMutations.url ?: effectiveUrl
@@ -298,6 +309,36 @@ fun sendRequest(scope: CoroutineScope, state: AppState, tab: RequestTabState) {
                             }
                             if (testResult.newCollectionVariables.isNotEmpty()) {
                                 state.mergeCollectionScriptVariables(testResult.newCollectionVariables)
+                            }
+                            if (testResult.executionSetNextRequestCalled) {
+                                val token = testResult.executionNextRequest
+                                if (token == null) {
+                                    state.log("↷ Script setNextRequest(null): stopping chain", LogLevel.INFO)
+                                } else {
+                                    if (chainDepth >= MAX_SCRIPT_CHAIN_DEPTH) {
+                                        state.log("⚠ Script chain limit reached ($MAX_SCRIPT_CHAIN_DEPTH)", LogLevel.WARNING)
+                                    } else {
+                                        val target = state.resolveScriptRequestTarget(
+                                            token = token,
+                                            preferredCollectionId = tab.collectionId,
+                                        )
+                                        if (target == null) {
+                                            state.log("⚠ setNextRequest target not found or ambiguous: $token", LogLevel.WARNING)
+                                        } else {
+                                            state.log("↷ setNextRequest → ${target.name}", LogLevel.INFO)
+                                            state.openRequest(
+                                                requestId = target.requestId,
+                                                name = target.name,
+                                                method = target.method,
+                                                url = target.url,
+                                            )
+                                            val nextTab = state.activeTab
+                                            if (nextTab != null) {
+                                                sendRequestInternal(scope, state, nextTab, chainDepth + 1)
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

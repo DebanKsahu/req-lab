@@ -437,9 +437,9 @@ class PostmanImporterTest {
     }
 
     @Test
-    fun `convertScript comments out postman_setNextRequest`() {
+    fun `convertScript translates postman_setNextRequest`() {
         val result = PostmanImporter.convertScript("postman.setNextRequest(null);")
-        assertTrue(result.contains("// postman.setNextRequest is not supported in ReqLab"))
+      assertTrue(result.contains("reqlab.execution.setNextRequest(null);"))
     }
 
     @Test
@@ -491,7 +491,7 @@ class PostmanImporterTest {
         assertTrue(result.contains("reqlab.environment.get"), "get converted")
         assertTrue(result.contains("response.code"), "responseCode.code converted")
         assertTrue(result.contains("response.text()"), "responseBody converted")
-        assertTrue(result.contains("// postman.setNextRequest is not supported in ReqLab"), "setNextRequest commented")
+        assertTrue(result.contains("reqlab.execution.setNextRequest(null);"), "setNextRequest translated")
     }
 
     // ── convertScript – scope preservation (globals / collectionVariables / variables) ──
@@ -570,16 +570,15 @@ class PostmanImporterTest {
     // ── convertScript – execution control ─────────────────────────────────────
 
     @Test
-    fun `convertScript comments out pm_execution_setNextRequest`() {
+    fun `convertScript translates pm_execution_setNextRequest`() {
         val result = PostmanImporter.convertScript("pm.execution.setNextRequest('Step2')")
-        assertTrue(result.contains("// pm.execution.setNextRequest is not supported in ReqLab"))
-        assertFalse(result.contains("reqlab.execution"))
+      assertTrue(result.contains("reqlab.execution.setNextRequest('Step2')"))
     }
 
     @Test
-    fun `convertScript comments out pm_execution_skipRequest`() {
+    fun `convertScript translates pm_execution_skipRequest`() {
         val result = PostmanImporter.convertScript("pm.execution.skipRequest()")
-        assertTrue(result.contains("// pm.execution.skipRequest is not supported in ReqLab"))
+      assertTrue(result.contains("reqlab.execution.skipRequest()"))
     }
 
     @Test

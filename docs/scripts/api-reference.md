@@ -81,6 +81,18 @@ Mutation semantics:
 - Pre-request scripts can mutate the outgoing request.
 - Post-request scripts can read `reqlab.request.*` values from the executed request context.
 
+## `reqlab.execution`
+
+| Property / Method | Description |
+|---|---|
+| `reqlab.execution.setNextRequest(nameOrIdOrRef)` | Queue another saved request to run after the current request completes. Accepts request name, request id, or requestRef. |
+| `reqlab.execution.setNextRequest(null)` | Stop script-driven chaining. |
+| `reqlab.execution.skipRequest()` | Skip sending the current request when called from pre-request script. |
+
+Postman compatibility notes:
+- `pm.execution.setNextRequest(...)` and `postman.setNextRequest(...)` are supported via import conversion and runtime aliases.
+- If multiple requests share the same name, resolution prefers the current collection; otherwise the target is treated as ambiguous and ignored.
+
 ## Variable scopes
 
 | Scope | Get | Set | Unset | Lifecycle |

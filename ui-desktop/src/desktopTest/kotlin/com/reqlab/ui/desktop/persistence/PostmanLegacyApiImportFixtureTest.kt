@@ -105,13 +105,13 @@ class PostmanLegacyApiImportFixtureTest {
     }
 
     @Test
-    fun login_test_script_comments_out_setNextRequest() {
+    fun login_test_script_translates_setNextRequest() {
         val state = buildState()
         val login = state.collections[0].children.firstOrNull { it.name == "Login" }
             ?: state.collections[0].children.first()
         val script = login.testScript!!
-        assertTrue(script.contains("// postman.setNextRequest is not supported in ReqLab"),
-            "postman.setNextRequest should be commented out")
+        assertTrue(script.contains("reqlab.execution.setNextRequest"),
+            "postman.setNextRequest should be translated to reqlab.execution.setNextRequest")
     }
 
     @Test

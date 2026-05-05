@@ -13,6 +13,9 @@ data class ScriptResult(
     val newCollectionVariables: Map<String, String> = emptyMap(),
     val newRequestVariables: Map<String, String> = emptyMap(),
     val requestMutations: ScriptRequestMutations = ScriptRequestMutations(),
+    val executionSetNextRequestCalled: Boolean = false,
+    val executionNextRequest: String? = null,
+    val executionSkipRequest: Boolean = false,
 )
 
 /**

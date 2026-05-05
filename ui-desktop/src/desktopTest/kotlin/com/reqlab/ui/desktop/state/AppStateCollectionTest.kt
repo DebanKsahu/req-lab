@@ -557,6 +557,58 @@ class AppStateCollectionTest {
     }
 
     @Test
+    fun resolveScriptRequestTarget_resolves_unique_name_across_collections() {
+        val state = AppState(openDefaultTab = false)
+        state.collections.clear()
+        state.collections.add(
+            CollectionNode(
+                id = "c1",
+                name = "Collection 1",
+                isFolder = true,
+                children = mutableStateListOf(
+                    CollectionNode(id = "r1", name = "Login", method = HttpMethodType.POST, url = "/login", requestRef = "ref-login")
+                ),
+            )
+        )
+
+        val target = state.resolveScriptRequestTarget("Login")
+
+        assertNotNull(target)
+        assertEquals("r1", target.requestId)
+        assertEquals(HttpMethodType.POST, target.method)
+    }
+
+    @Test
+    fun resolveScriptRequestTarget_returns_null_for_ambiguous_name_without_collection_hint() {
+        val state = AppState(openDefaultTab = false)
+        state.collections.clear()
+        state.collections.add(
+            CollectionNode(
+                id = "c1",
+                name = "Collection 1",
+                isFolder = true,
+                children = mutableStateListOf(
+                    CollectionNode(id = "r1", name = "Login", method = HttpMethodType.POST, url = "/login")
+                ),
+            )
+        )
+        state.collections.add(
+            CollectionNode(
+                id = "c2",
+                name = "Collection 2",
+                isFolder = true,
+                children = mutableStateListOf(
+                    CollectionNode(id = "r2", name = "Login", method = HttpMethodType.POST, url = "/login2")
+                ),
+            )
+        )
+
+        val target = state.resolveScriptRequestTarget("Login")
+
+        assertNull(target)
+    }
+
+    @Test
     fun syncSidebarToActiveTab_does_not_scroll_when_request_already_selected() {
         val state = AppState(withDemoData = true)
         // Simulate sidebar click path: request already selected before active-tab sync runs.

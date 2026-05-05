@@ -319,14 +319,14 @@ object PostmanImporter {
             .replace("pm.response.to.have.header(", "reqlab.response.hasHeader(")
             .replace(Regex("""\bpm\.response\.to\.be\.ok\b"""), "reqlab.response.statusOk()")
 
-            // ── Unsupported operations — comment them out ─────────────────────
+            // ── Execution control (Postman-compatible) ───────────────────────
             .replace(
                 Regex("""\bpm\.execution\.setNextRequest\s*\("""),
-                "// pm.execution.setNextRequest is not supported in ReqLab\n// pm.execution.setNextRequest(",
+                "reqlab.execution.setNextRequest(",
             )
             .replace(
                 Regex("""\bpm\.execution\.skipRequest\s*\("""),
-                "// pm.execution.skipRequest is not supported in ReqLab\n// pm.execution.skipRequest(",
+                "reqlab.execution.skipRequest(",
             )
             // pm.sendRequest is fully supported — translate directly
             .replace("pm.sendRequest(", "reqlab.sendRequest(")
@@ -357,7 +357,7 @@ object PostmanImporter {
             .replace("postman.clearGlobalVariables(", "reqlab.globals.clear(")
             .replace(
                 Regex("""\bpostman\.setNextRequest\s*\("""),
-                "// postman.setNextRequest is not supported in ReqLab\n// postman.setNextRequest(",
+                "reqlab.execution.setNextRequest(",
             )
 
             // ── Legacy global sandbox shortcuts ───────────────────────────────

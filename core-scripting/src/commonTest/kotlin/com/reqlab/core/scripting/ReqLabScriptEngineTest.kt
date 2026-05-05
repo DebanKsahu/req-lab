@@ -2017,4 +2017,25 @@ class ReqLabScriptEngineTest {
         assertTrue(r.success, "Expected success")
         assertEquals("req-99", r.newVariables["requestId"])
     }
+
+    @Test
+    fun execution_setNextRequest_sets_control_fields() = runTest {
+        val r = engine.executeTestScript(
+            "reqlab.execution.setNextRequest('Step2')",
+            ctx(status = 200, body = "{}"),
+        )
+        assertTrue(r.success)
+        assertTrue(r.executionSetNextRequestCalled)
+        assertEquals("Step2", r.executionNextRequest)
+    }
+
+    @Test
+    fun execution_skipRequest_sets_control_field() = runTest {
+        val r = engine.executePreRequestScript(
+            "reqlab.execution.skipRequest()",
+            ctx(),
+        )
+        assertTrue(r.success)
+        assertTrue(r.executionSkipRequest)
+    }
 }
