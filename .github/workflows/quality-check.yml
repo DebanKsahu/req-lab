@@ -39,6 +39,7 @@ jobs:
       - name: Run unit tests
         run: |
           ./gradlew \
+            :editor-ui:desktopTest \
             :core-scripting:desktopTest \
             :ui-shared:desktopTest \
             :qa-tests:jvmTest \

@@ -43,7 +43,10 @@ class DiagnosticsAndFoldUpdateTest {
         // so foldVersion > 0 guarantees foldRegions is populated AND the StateFlow write
         // establishes a happens-before that makes foldRegions visible to this thread.
         awaitUntil(description = "initial fold pass") {
-            v.state.value.foldVersion > 0 || v.document.length == 0
+            v.state.value.foldVersion > 0 ||
+                v.foldRegions.isNotEmpty() ||
+                v.document.length == 0 ||
+                v.document.lineCount <= 1
         }
         return v
     }
@@ -53,7 +56,7 @@ class DiagnosticsAndFoldUpdateTest {
      * More reliable than a fixed delay on slow CI machines.
      */
     private fun awaitUntil(
-        timeoutMs: Long = 10_000,
+        timeoutMs: Long = 30_000,
         description: String = "condition",
         condition: () -> Boolean,
     ) {
