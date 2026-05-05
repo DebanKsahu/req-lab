@@ -22,7 +22,7 @@ private val graalEngine: Engine by lazy {
         .build()
 }
 
-    private const val SCRIPT_TIMEOUT_SECONDS = 5L
+    private const val SCRIPT_TIMEOUT_SECONDS = 60L
 
 internal actual fun evaluateJs(script: String): String {
     return try {
