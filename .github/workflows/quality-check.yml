@@ -18,7 +18,7 @@ jobs:
   unit-tests:
     name: Unit & Integration Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     steps:
       - name: Checkout
@@ -36,14 +36,25 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
+      - name: Run compile checks (including Wasm)
+        run: |
+          ./gradlew \
+            :editor-core:compileKotlinWasmJs \
+            :editor-ui:compileKotlinWasmJs \
+            :ui-shared:compileKotlinWasmJs \
+            :ui-web:compileKotlinWasmJs \
+            --no-daemon --stacktrace
+
       - name: Run unit tests
         run: |
           ./gradlew \
+            :editor-core:desktopTest \
             :editor-ui:desktopTest \
             :core-scripting:desktopTest \
             :ui-shared:desktopTest \
             :qa-tests:jvmTest \
-            --no-daemon --continue
+            :ui-web:wasmJsTest \
+            --no-daemon --stacktrace --continue
 
       - name: Upload test reports on failure
         if: failure()

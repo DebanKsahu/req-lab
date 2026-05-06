@@ -548,7 +548,7 @@ object JavaScriptMode : LanguageModeProvider {
                 if ((token == "else" || token == "catch" || token == "finally") &&
                     out.isNotEmpty() && out.toString().trimEnd().last() == '}'
                 ) {
-                    while (out.isNotEmpty() && out.last() == '\n') out.deleteCharAt(out.length - 1)
+                    while (out.isNotEmpty() && out.last() == '\n') out.deleteAt(out.length - 1)
                     atLineStart = false
                     out.append(' ')
                     out.append(token)
@@ -657,13 +657,13 @@ object JavaScriptMode : LanguageModeProvider {
                     if (!followedByContinuation) appendNewLine()
                 }
                 ';' -> {
-                    while (out.isNotEmpty() && out.last() == ' ') out.deleteCharAt(out.length - 1)
+                    while (out.isNotEmpty() && out.last() == ' ') out.deleteAt(out.length - 1)
                     out.append(';')
                     pendingSpace = false
                     if (!inForHeader) appendNewLine()
                 }
                 ',' -> {
-                    while (out.isNotEmpty() && out.last() == ' ') out.deleteCharAt(out.length - 1)
+                    while (out.isNotEmpty() && out.last() == ' ') out.deleteAt(out.length - 1)
                     out.append(',')
                     pendingSpace = true
                 }
