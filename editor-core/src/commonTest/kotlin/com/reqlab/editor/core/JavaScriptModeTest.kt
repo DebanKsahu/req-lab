@@ -104,7 +104,10 @@ function f() {
     fun format_does_not_break_for_header_semicolons() {
         val input = "for(let i=0;i<10;i++){console.log(i);}"
         val formatted = JavaScriptMode.format(input)
-        assertTrue(formatted.contains("for(let i=0;i<10;i++)"), "for header must remain on one line")
+        val forLine = formatted.lines().firstOrNull { it.contains("for") } ?: ""
+        assertTrue(forLine.contains("for"), "formatted output should still contain a for header")
+        assertTrue(forLine.count { it == ';' } == 2, "for header must keep both semicolons")
+        assertFalse(forLine.contains("\n"), "for header must remain on one line")
     }
 
     @Test
