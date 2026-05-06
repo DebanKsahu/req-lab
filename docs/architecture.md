@@ -294,7 +294,7 @@ ScriptEngine.execute(script, context)
      └── Produces: named test results (pass / fail + message)
 ```
 
-Scripts run synchronously. The JS runtime is sandboxed — no file system or network access available from scripts.
+Scripts run synchronously. The JS runtime is sandboxed — no file system access is available from scripts. Network calls are supported through `reqlab.sendRequest(...)`.
 
 ---
 

@@ -581,8 +581,8 @@ object ImportExportRepository {
             ?: throw ImportExportException("Request name is missing")
         val method = root["method"]?.jsonPrimitive?.contentOrNull ?: "GET"
         val url = root["url"]?.jsonPrimitive?.contentOrNull ?: ""
-        val preRequestScript = root["preRequestScript"]?.jsonPrimitive?.contentOrNull
-        val testScript = root["testScript"]?.jsonPrimitive?.contentOrNull
+        val preRequestScript = normalizeImportedScript(root["preRequestScript"]?.jsonPrimitive?.contentOrNull)
+        val testScript = normalizeImportedScript(root["testScript"]?.jsonPrimitive?.contentOrNull)
         val userHeaders = root["headers"]?.jsonArray?.mapNotNull { el ->
             val obj = el.jsonObject
             val k = obj["key"]?.jsonPrimitive?.contentOrNull
@@ -628,6 +628,28 @@ object ImportExportRepository {
             authUsername = authUsername, authPassword = authPassword,
             authToken = authToken, authApiKey = authApiKey, authApiValue = authApiValue,
         )
+    }
+
+    /**
+     * ReqLab collections can contain older Postman-style execution aliases.
+     * Normalize those on import so scripts are consistent with the active
+     * runtime namespace (`reqlab.execution.*`).
+     */
+    private fun normalizeImportedScript(script: String?): String? {
+        if (script.isNullOrBlank()) return script
+        return script
+            .replace(
+                Regex("""\bpm\.execution\.setNextRequest\s*\("""),
+                "reqlab.execution.setNextRequest(",
+            )
+            .replace(
+                Regex("""\bpostman\.setNextRequest\s*\("""),
+                "reqlab.execution.setNextRequest(",
+            )
+            .replace(
+                Regex("""\bpm\.execution\.skipRequest\s*\("""),
+                "reqlab.execution.skipRequest(",
+            )
     }
 
     private fun formEntryFromJson(obj: JsonObject): FormDataEntryState {

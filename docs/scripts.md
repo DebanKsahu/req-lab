@@ -531,8 +531,8 @@ When a Postman collection is imported, ReqLab automatically rewrites all `pm.*` 
 | `pm.info` | `reqlab.info` | Stub — see Section 2.7 |
 | `pm.iterationData` | `reqlab.iterationData` | Stub — see Section 2.8 |
 | `pm.cookies` | `reqlab.cookies` | Stub — see Section 2.8 |
-| `pm.execution.setNextRequest(req)` | *commented out* | Collection runner flow control; not applicable |
-| `pm.execution.skipRequest()` | *commented out* | Collection runner flow control; not applicable |
+| `pm.execution.setNextRequest(req)` | `reqlab.execution.setNextRequest(req)` | Supported via execution API mapping |
+| `pm.execution.skipRequest()` | `reqlab.execution.skipRequest()` | Supported via execution API mapping |
 | `pm.sendRequest(url, cb)` | `reqlab.sendRequest(url, cb)` | Fully supported — see Section 2.9 |
 
 ### 8.2 Legacy `postman.*` API (Postman pre-v6)
@@ -549,7 +549,7 @@ Collections exported from older versions of Postman use a `postman.*` namespace 
 | `postman.getGlobalVariable(k)` | `reqlab.globals.get(k)` | |
 | `postman.clearGlobalVariable(k)` | `reqlab.globals.unset(k)` | |
 | `postman.clearGlobalVariables()` | `reqlab.globals.clear()` | |
-| `postman.setNextRequest(req)` | *commented out* | Collection-runner flow control; not applicable |
+| `postman.setNextRequest(req)` | `reqlab.execution.setNextRequest(req)` | Supported via execution API mapping |
 | `responseBody` (global string) | `response.text()` | Old sandbox global |
 | `responseCode.code` (global object) | `response.code` | Old sandbox global |
 | `responseCode.name` | `response.status` | Old sandbox global |
@@ -579,7 +579,8 @@ if (response.code === 200) {
     reqlab.environment.set('SESSION_ID', jsonData.sessionId);
     reqlab.environment.set('ORG_ID', jsonData.orgId);
 } else {
-    console.log("Login failed for user " + reqlab.environment.get('USERNAME'));
+  reqlab.execution.setNextRequest(null);
+  console.log("Login failed for user " + reqlab.environment.get('USERNAME'));
 }
 ```
 
@@ -587,8 +588,6 @@ if (response.code === 200) {
 
 | Feature | Why |
 |---|---|
-| `postman.setNextRequest(req)` | Collection-runner flow control; no equivalent in ReqLab |
-| `pm.execution.setNextRequest(req)` | Collection-runner flow control; commented out on import |
-| `pm.execution.skipRequest()` | Collection-runner flow control; commented out on import |
+| Unrecognized custom Postman globals/helpers | ReqLab rewrites known APIs only; non-standard helpers require manual edits |
 
 > **Note:** `pm.sendRequest()` is fully supported and translated to `reqlab.sendRequest()` on import. See [Section 2.9](#29-reqlabsendrequest--http-sub-requests-from-scripts) for the complete API reference.

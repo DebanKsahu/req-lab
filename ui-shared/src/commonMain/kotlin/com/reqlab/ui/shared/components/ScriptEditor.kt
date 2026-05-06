@@ -42,7 +42,7 @@ fun ScriptEditor(
             showToolbar = true,
             enableFolding = false,
             enableSearch = true,
-            enableFormat = false,  // JS formatting not implemented
+            enableFormat = true,
             enableWordWrap = true,
             enableCopy = true,
             enableDownload = false,

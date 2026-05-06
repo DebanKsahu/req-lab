@@ -82,7 +82,7 @@ A full-featured Compose-native code editor — no WebView, no Electron.
 - **Syntax highlighting**: JSON, XML/HTML, GraphQL, JavaScript
 - **Code folding**: brace-based (`{ }`, `[ ]`), tag-based, comment-based; Fold All / Unfold All
 - **In-editor search**: incremental match count, Previous/Next, keyboard-accessible
-- **Auto-format**: JSON pretty-print, XML/HTML indentation
+- **Auto-format**: JSON pretty-print, XML/HTML indentation, JavaScript formatting (script editor + body editor)
 - Line numbers gutter, word wrap toggle, monospace font
 - Virtualized rendering (no jank on responses over 10 MB)
 - Full clipboard support (copy, cut, paste, select all) in both edit and read-only modes
@@ -151,7 +151,7 @@ Import **Postman Collection v2 / v2.1** and **Postman Environment** files direct
 - Legacy `postman.*` API calls (pre-v6) are also converted on import
 - Disabled headers and variables are skipped on import
 - `pm.sendRequest` is **fully supported** — translated to `reqlab.sendRequest()` automatically
-- `postman.setNextRequest` has no equivalent and is commented out with a note
+- `pm.execution.setNextRequest`, `pm.execution.skipRequest`, and `postman.setNextRequest` are translated to `reqlab.execution.*`
 - See [docs/scripts.md](docs/scripts.md#8-postman-migration-guide) for the full conversion reference
 
 ### ⌨️ Keyboard Shortcuts

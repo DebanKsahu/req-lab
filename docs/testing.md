@@ -43,7 +43,7 @@ Editor engine micro-tests (15 test classes).
 - `LineIndexTest` — line start/end lookup, newline scanning performance
 - `LanguageModeTest` — mode detection, auto-detection from content hints
 - `JsonModeTest` — JSON tokenizer correctness on valid/invalid input
-- `JavaScriptModeTest` — JS token classification (keywords, strings, regex literals)
+- `JavaScriptModeTest` — JS token classification and formatter regression coverage (blocks, comments, strings, `for(...)` headers)
 - `XmlHtmlModeTest` — tag, attribute, and CDATA tokenization
 - `PerformanceBenchmarkTest` — lexer throughput and display-line rebuild timing
 

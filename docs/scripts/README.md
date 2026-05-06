@@ -46,6 +46,7 @@ The global (prefix-free) API is also supported for backward compatibility.
 - Pre-request scripts can mutate request URL, method, body, headers, and query params before send.
 - Post-request scripts can read response code/status/time/size/body/headers and register multiple named tests.
 - `environment`, `globals`, `collectionVariables`, and `variables` scopes are available inside scripts.
+- Script tabs support in-editor JavaScript formatting from the editor toolbar.
 - The engine executes JavaScript synchronously for request flow; asynchronous callbacks are not awaited before request dispatch.
 
 ## Example — pre-request script

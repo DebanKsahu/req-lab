@@ -61,6 +61,7 @@ ReqLab features a full-featured code editor used across request body editing, sc
 **Formatting** — Auto-format source code:
 - JSON pretty-print (indented with 2-space indent)
 - XML / HTML indentation
+- JavaScript formatting (including script editor)
 - Toggle on/off from toolbar
 
 **Editor Features**:
@@ -126,7 +127,8 @@ Pre-request scripts can mutate outgoing request values:
 - **Postman Collection v2 / v2.1 import** — auto-detected and converted to ReqLab format
   - Folders, requests, headers, auth (bearer / basic / API key), body (raw JSON, form-data, urlencoded, GraphQL, binary), and scripts
   - Postman `pm.*` script namespace automatically rewritten to `reqlab.*`
-  - `pm.sendRequest` calls commented out (unsupported)
+   - `pm.sendRequest` rewritten to `reqlab.sendRequest` (supported)
+   - `pm.execution.setNextRequest`, `pm.execution.skipRequest`, and `postman.setNextRequest` rewritten to `reqlab.execution.*`
 - **Postman Environment import** — name and enabled variables imported; disabled variables skipped
 - Request-level pre-request and post-request scripts in collection items
 - Automated collection validation via `qa-tests/collection-validator.mjs`

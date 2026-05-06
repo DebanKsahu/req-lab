@@ -157,6 +157,33 @@ class PostmanImportIntegrationTest {
         )
     }
 
+    @Test
+    fun importCollectionFromString_reqLabFormat_normalizes_execution_aliases_to_reqlab() {
+        val state = AppState(withDemoData = false)
+        val reqLabJson = """
+        {
+          "type": "reqLabCollection",
+          "version": "1.0",
+          "name": "Alias Normalization",
+          "folders": [],
+          "requests": [
+            {
+              "name": "Login",
+              "method": "GET",
+              "url": "https://api.example.com/login",
+              "preRequestScript": "pm.execution.skipRequest();",
+              "testScript": "postman.setNextRequest('Token');"
+            }
+          ]
+        }
+        """.trimIndent()
+
+        ImportExportRepository.importCollectionFromString(state, reqLabJson)
+        val req = state.collections[0].children[0]
+        assertEquals("reqlab.execution.skipRequest();", req.preRequestScript)
+        assertEquals("reqlab.execution.setNextRequest('Token');", req.testScript)
+    }
+
     // ── environment import ─────────────────────────────────────────────────────
 
     @Test

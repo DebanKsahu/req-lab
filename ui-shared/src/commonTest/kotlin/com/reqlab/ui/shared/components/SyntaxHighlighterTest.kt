@@ -398,10 +398,12 @@ const a = 1;
     }
 
     @Test
-    fun autoFormat_javascript_returns_raw() {
-        val input = "function foo() { return 1; }"
+    fun autoFormat_javascript_formats_blocks_and_statements() {
+        val input = "function foo(){const x=1;return x;}"
         val result = autoFormat(input, SyntaxLanguage.JAVASCRIPT)
-        assertEquals(input, result, "JS autoformat should return raw text (no formatter)")
+        assertNotEquals(input, result, "Expected JS formatter to transform compact input")
+        assertTrue(result.contains("function foo"), "Expected function signature to remain")
+        assertTrue(result.contains("return x;"), "Expected statement preserved")
     }
 
     @Test
