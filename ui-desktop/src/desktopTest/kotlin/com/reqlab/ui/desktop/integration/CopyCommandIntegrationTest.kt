@@ -1,7 +1,7 @@
 package com.reqlab.ui.desktop.integration
 
-import com.reqlab.core.model.HttpMethodType
 import com.reqlab.core.model.BodyType
+import com.reqlab.core.model.HttpMethodType
 import com.reqlab.server.module
 import com.reqlab.ui.shared.components.buildCurlCommand
 import com.reqlab.ui.shared.components.buildPowerShellCommand
@@ -28,7 +28,11 @@ class CopyCommandIntegrationTest {
         @JvmStatic
         @BeforeClass
         fun startServer() {
-            server = embeddedServer(Netty, port = PORT, module = io.ktor.server.application.Application::module)
+            server = embeddedServer(
+                Netty,
+                port = PORT,
+                module = io.ktor.server.application.Application::module
+            )
             server.start(wait = false)
             Thread.sleep(300)
         }
@@ -47,9 +51,10 @@ class CopyCommandIntegrationTest {
         }
 
         private fun pythonRequestsAvailable(): Boolean {
-            val process = ProcessBuilder("sh", "-lc", "python3 -c 'import requests' >/dev/null 2>&1")
-                .redirectErrorStream(true)
-                .start()
+            val process =
+                ProcessBuilder("sh", "-lc", "python3 -c 'import requests' >/dev/null 2>&1")
+                    .redirectErrorStream(true)
+                    .start()
             return process.waitFor() == 0
         }
 
@@ -208,9 +213,15 @@ class CopyCommandIntegrationTest {
             val powershell = buildPowerShellCommand(tab, layers)
 
             listOf(curl, python, powershell).forEach { command ->
-                assertFalse(command.contains("{{"), "Unresolved variable found in command: $command")
+                assertFalse(
+                    command.contains("{{"),
+                    "Unresolved variable found in command: $command"
+                )
                 assertTrue(command.contains(case.expectedUrl), "URL not resolved in: $command")
-                assertTrue(command.contains(case.expectedBodyFragment), "Body not resolved in: $command")
+                assertTrue(
+                    command.contains(case.expectedBodyFragment),
+                    "Body not resolved in: $command"
+                )
                 assertTrue(command.contains("trace-123"), "Header value not resolved in: $command")
             }
         }
@@ -251,9 +262,17 @@ class CopyCommandIntegrationTest {
         assumeTrue(commandExists("pwsh"))
 
         val command = buildPowerShellCommand(sampleTab(), baseLayers())
-        val escaped = command.replace("\"", "\\\"")
-        val (exitCode, output) = runShell("pwsh -NoProfile -Command \"$escaped | Out-Null\"")
 
+        val tempCommandFile = File.createTempFile("reqlab-copy-test", ".ps1")
+        tempCommandFile.writeText(command)
+
+        val process = ProcessBuilder("pwsh", "-NoProfile", "-File", tempCommandFile.absolutePath)
+            .redirectErrorStream(true)
+            .start()
+        val output = process.inputStream.bufferedReader().readText()
+        val exitCode = process.waitFor()
         assertEquals(0, exitCode, "pwsh failed: $output")
+
+        tempCommandFile.delete()
     }
 }
