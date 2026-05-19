@@ -30,7 +30,7 @@ class InMemoryRepositoriesTest {
     @Test
     fun request_repository_supports_concurrent_upsert_and_delete() = runTest {
         val repository = InMemoryRequestRepository()
-        val sampleSize = 5
+        val sampleSize = 100
 
         coroutineScope {
             repeat(sampleSize) {
@@ -126,6 +126,34 @@ class InMemoryRepositoriesTest {
 
         val history = repository.observeRecent(limit = 10).first()
         assertEquals(listOf("h-2", "h-1"), history.map { it.id })
+
+        repository.clear()
+        assertTrue(repository.observeRecent().first().isEmpty())
+    }
+
+    @Test
+    fun history_repository_stores_and_orders_concurrent_recent_requests() = runTest {
+        val repository = InMemoryHistoryRepository()
+        val sampleSize = 100
+
+        coroutineScope {
+            repeat(sampleSize) {
+                launch(Dispatchers.Default) {
+                    repository.append(
+                        HistoryEntry(
+                            id = "h-$it",
+                            requestId = "r-$it",
+                            requestSnapshot = sampleRequest("r-$it"),
+                            responseSnapshot = null,
+                            executedAtEpochMillis = 100
+                        )
+                    )
+                }
+            }
+        }
+
+        val history = repository.observeRecent().first()
+        assertEquals(sampleSize, history.size)
 
         repository.clear()
         assertTrue(repository.observeRecent().first().isEmpty())
