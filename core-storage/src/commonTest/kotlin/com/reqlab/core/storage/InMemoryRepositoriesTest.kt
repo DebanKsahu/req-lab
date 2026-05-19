@@ -5,7 +5,10 @@ import com.reqlab.core.model.EnvironmentDefinition
 import com.reqlab.core.model.HistoryEntry
 import com.reqlab.core.model.HttpMethodType
 import com.reqlab.core.model.RequestDefinition
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -22,6 +25,39 @@ class InMemoryRepositoriesTest {
 
         repository.delete("req-1")
         assertTrue(repository.observeAll().first().isEmpty())
+    }
+
+    @Test
+    fun request_repository_supports_concurrent_upsert_and_delete() = runTest {
+        val repository = InMemoryRequestRepository()
+        val sampleSize = 5
+
+        coroutineScope {
+            repeat(sampleSize) {
+                launch(Dispatchers.Default) {
+                    repository.upsert(sampleRequest("$it"))
+                }
+            }
+        }
+
+        assertEquals(sampleSize, repository.observeAll().first().size)
+
+        coroutineScope {
+            repeat(sampleSize) {
+                if (it % 2 == 0) {
+                    launch(Dispatchers.Default) {
+                        repository.delete("$it")
+                    }
+                }
+            }
+        }
+
+        assertEquals(sampleSize / 2, repository.observeAll().first().size)
+        assertTrue(
+            repository.observeAll().first().all { request ->
+                request.id.toInt() % 2 != 0
+            }
+        )
     }
 
     @Test
