@@ -7,6 +7,7 @@ import com.reqlab.core.model.RequestDefinition
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 
 // ── Shared base ──────────────────────────────────────────────────
 
@@ -28,11 +29,16 @@ abstract class InMemoryMapRepository<T>(
     }
 
     suspend fun upsertEntity(entity: T) {
-        store.value = store.value + (getKey(entity) to entity)
+        store.update { currentValue ->
+            val newPair = (getKey(entity) to entity)
+            currentValue + newPair
+        }
     }
 
     suspend fun deleteEntity(id: String) {
-        store.value = store.value - id
+        store.update { currentValue ->
+            currentValue - id
+        }
     }
 }
 
@@ -73,10 +79,12 @@ class InMemoryHistoryRepository : HistoryRepository {
     }
 
     override suspend fun append(entry: HistoryEntry) {
-        state.value = state.value + entry
+        state.update { currentValue ->
+            currentValue + entry
+        }
     }
 
     override suspend fun clear() {
-        state.value = emptyList()
+        state.update { emptyList() }
     }
 }
